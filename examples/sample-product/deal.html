@@ -1,0 +1,10 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Acme CRM · Hooli renewal</title></head><body>
+<main><h1>Hooli renewal</h1>
+<label>Stage <select id="stage"><option>New</option><option>Negotiation</option><option>Won</option></select></label>
+<label>Amount <input id="amount" value="12000"></label>
+<button id="save" onclick="document.getElementById('status').textContent='Saved ' + document.getElementById('stage').value">Save deal</button>
+<button onclick="document.getElementById('status').textContent='Deleted'">Delete deal</button>
+<button onclick="document.getElementById('tip').hidden=false">Show forecast</button>
+<p id="tip" hidden>Forecast: 80% likely to close</p>
+<p id="status" role="status"></p>
+</main></body></html>

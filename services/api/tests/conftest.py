@@ -4,14 +4,15 @@ import uuid
 import asyncpg
 import httpx
 import pytest
-
 from ultrademo_api.app import create_app
 from ultrademo_api.bootstrap import bootstrap
 from ultrademo_api.db import Database
 from ultrademo_api.migrate import default_migrations_dir, migrate
 from ultrademo_api.settings import Settings
 
-ADMIN_DSN = os.environ.get("ULTRADEMO_TEST_ADMIN_DSN", "postgresql://postgres@localhost:5432/postgres")
+ADMIN_DSN = os.environ.get(
+    "ULTRADEMO_TEST_ADMIN_DSN", "postgresql://postgres@localhost:5432/postgres"
+)
 
 
 def spec(slug: str, status: str = "published") -> dict:
@@ -57,7 +58,9 @@ async def orgs(dsn):
 
 @pytest.fixture(scope="session")
 def settings(dsn) -> Settings:
-    return Settings(database_url=dsn, internal_token="test-internal", public_base_url="https://ud.example")
+    return Settings(
+        database_url=dsn, internal_token="test-internal", public_base_url="https://ud.example"
+    )
 
 
 @pytest.fixture(scope="session")
@@ -69,4 +72,3 @@ async def client(settings, orgs):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
         yield c
     await db.close()
-

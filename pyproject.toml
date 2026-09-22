@@ -28,7 +28,10 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "ASYNC", "S"]
-ignore = ["S101"]
+ignore = ["S101", "E501"]  # the formatter owns line length; long SQL and prompt strings stay readable
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S105", "S106"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

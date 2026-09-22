@@ -1,0 +1,22 @@
+{
+  "organization": {"slug": "acme", "name": "Acme", "region": "us"},
+  "product": {
+    "name": "Acme CRM (sample)",
+    "base_url": "http://sample-product:8080/index.html",
+    "allowed_domains": ["sample-product"]
+  },
+  "agent": {
+    "name": "Ava",
+    "system_prompt": "You are Ava, a product expert for Acme CRM. Acme CRM helps small sales teams track deals, forecast revenue and approve discounts. Lead with the deal pipeline and the forecast; offer to book a call with sales when the viewer asks about pricing or rollout.",
+    "voice": {"voice_id": "EXAVITQu4vr4xnSDxMaL", "model": "eleven_flash_v2_5", "stt_language": "multi"},
+    "policy": {"blocked": ["\\bbilling\\b"]},
+    "model": {"id": "claude-opus-5", "effort": "low"}
+  },
+  "launch_config": {
+    "slug": "acme-crm-demo",
+    "name": "Acme CRM live demo",
+    "description": "Talk to Ava and see Acme CRM in action.",
+    "status": "published",
+    "ctas": [{"kind": "book", "label": "Book a call with sales", "url": "https://cal.example/acme"}]
+  }
+}

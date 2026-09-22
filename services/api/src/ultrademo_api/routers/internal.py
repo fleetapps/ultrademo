@@ -138,8 +138,19 @@ async def append_transcript(
             " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
             " ON CONFLICT (session_id, seq) DO NOTHING",
             [
-                (org_id, session_id, x.seq, x.role, x.speaker_name, x.content, x.source, x.lang,
-                 x.interrupted, x.started_at, x.ended_at)
+                (
+                    org_id,
+                    session_id,
+                    x.seq,
+                    x.role,
+                    x.speaker_name,
+                    x.content,
+                    x.source,
+                    x.lang,
+                    x.interrupted,
+                    x.started_at,
+                    x.ended_at,
+                )
                 for x in lines
             ],
         )
@@ -170,8 +181,18 @@ async def append_actions(
             " policy_class, element, latency_ms) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
             " ON CONFLICT (session_id, seq) DO NOTHING",
             [
-                (org_id, session_id, a.seq, a.tool, a.args, a.status, a.result_summary,
-                 a.policy_class, a.element, a.latency_ms)
+                (
+                    org_id,
+                    session_id,
+                    a.seq,
+                    a.tool,
+                    a.args,
+                    a.status,
+                    a.result_summary,
+                    a.policy_class,
+                    a.element,
+                    a.latency_ms,
+                )
                 for a in actions
             ],
         )
@@ -180,8 +201,16 @@ async def append_actions(
 class CostItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     item: Literal[
-        "llm_in", "llm_out", "llm_cache_read", "llm_cache_write", "stt_sec", "tts_chars",
-        "sandbox_sec", "livekit_agent_min", "livekit_participant_min", "egress_gb",
+        "llm_in",
+        "llm_out",
+        "llm_cache_read",
+        "llm_cache_write",
+        "stt_sec",
+        "tts_chars",
+        "sandbox_sec",
+        "livekit_agent_min",
+        "livekit_participant_min",
+        "egress_gb",
     ]
     qty: Decimal
     usd: Decimal
@@ -234,5 +263,9 @@ async def mark_ended(
             await conn.execute(
                 "INSERT INTO outbox (org_id, topic, payload) VALUES ($1, 'session.ended', $2)",
                 org_id,
-                {"session_id": str(session_id), "reason": body.reason, "is_valid": validity == "valid"},
+                {
+                    "session_id": str(session_id),
+                    "reason": body.reason,
+                    "is_valid": validity == "valid",
+                },
             )

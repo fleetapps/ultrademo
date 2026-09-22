@@ -5,7 +5,13 @@ from fastapi import Depends, Request
 
 from ultrademo_api.db import Database
 from ultrademo_api.errors import ApiError
-from ultrademo_api.security import KeyCache, Principal, constant_time_equals, parse_prefix, verify_api_key
+from ultrademo_api.security import (
+    KeyCache,
+    Principal,
+    constant_time_equals,
+    parse_prefix,
+    verify_api_key,
+)
 from ultrademo_api.settings import Settings
 
 
@@ -38,9 +44,13 @@ async def get_principal(request: Request, db: Annotated[Database, Depends(get_db
         row = await conn.fetchrow("SELECT * FROM auth_api_key($1)", prefix)
     if row is None or not verify_api_key(token, row["key_hash"]):
         raise ApiError(401, "unauthorized", "Invalid API key")
-    principal = Principal(org_id=row["org_id"], key_id=row["key_id"], scopes=frozenset(row["scopes"]))
+    principal = Principal(
+        org_id=row["org_id"], key_id=row["key_id"], scopes=frozenset(row["scopes"])
+    )
     async with db.tenant(principal.org_id) as conn:
-        await conn.execute("UPDATE api_keys SET last_used_at = now() WHERE id = $1", principal.key_id)
+        await conn.execute(
+            "UPDATE api_keys SET last_used_at = now() WHERE id = $1", principal.key_id
+        )
     cache.put(token, principal)
     return principal
 

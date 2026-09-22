@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Acme CRM · Deals</title></head><body>
+<nav><a href="/index.html">Deals</a> <a href="/billing.html">Billing</a> <a href="https://evil.example/phish">Partner portal</a>
+<a href="/report.html" target="_blank">Open report</a></nav>
+<main><h1>Deals</h1>
+<label>Search deals <input type="search" id="q"></label>
+<ul id="list"><li><a href="/deal.html">Hooli renewal</a></li><li><a href="/deal.html">Initech expansion</a></li></ul>
+</main>
+<script>
+document.getElementById('q').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { document.getElementById('list').innerHTML = '<li>Result for ' + e.target.value + '</li>'; }
+});
+</script></body></html>

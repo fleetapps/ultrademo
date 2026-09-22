@@ -58,7 +58,13 @@ class Policy:
             return PolicyClass.ALLOWED
         if any(p.search(name) for p in self.blocked):
             return PolicyClass.BLOCKED
-        if tool == "operate_click" and role in ("button", "menuitem", "link", "menuitemcheckbox", ""):
+        if tool == "operate_click" and role in (
+            "button",
+            "menuitem",
+            "link",
+            "menuitemcheckbox",
+            "",
+        ):
             submits = True
         if submits and any(p.search(name) for p in self.confirm):
             if any(p.search(name) for p in self.allowed):

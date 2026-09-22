@@ -19,11 +19,11 @@ import structlog
 from fastapi import Depends, FastAPI, HTTPException, Request
 from playwright.async_api import Browser, async_playwright
 from pydantic import BaseModel, ConfigDict, Field
+from ultrademo_protocol import ToolResult
 
 from ultrademo_operator.sandbox import Sandbox, SandboxConfig
 from ultrademo_operator.settings import Settings, get_settings
 from ultrademo_operator.streamer import ScreenStreamer, sandbox_token
-from ultrademo_protocol import ToolResult
 
 log = structlog.get_logger()
 
@@ -97,7 +97,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 yield
             finally:
                 task.cancel()
-                await asyncio.gather(*(e.close() for e in sandboxes.values()), return_exceptions=True)
+                await asyncio.gather(
+                    *(e.close() for e in sandboxes.values()), return_exceptions=True
+                )
                 sandboxes.clear()
                 if app.state.shared:
                     await app.state.shared.close()
@@ -119,13 +121,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         starting += 1
         try:
             config = SandboxConfig(
-                session_id=body.session_id, start_url=body.start_url,
-                allowed_domains=body.allowed_domains, policy=body.policy,
-                width=body.width, height=body.height, locale=body.locale,
+                session_id=body.session_id,
+                start_url=body.start_url,
+                allowed_domains=body.allowed_domains,
+                policy=body.policy,
+                width=body.width,
+                height=body.height,
+                locale=body.locale,
             )
             try:
                 sandbox = await Sandbox.launch(
-                    request.app.state.pw, config, settings.chromium_executable, request.app.state.shared
+                    request.app.state.pw,
+                    config,
+                    settings.chromium_executable,
+                    request.app.state.shared,
                 )
             except ValueError as e:
                 raise HTTPException(422, str(e)) from e
@@ -133,8 +142,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if body.livekit_room:
                 streamer = ScreenStreamer(sandbox.page, body.width, body.height)
                 token = sandbox_token(
-                    settings.livekit_api_key, settings.livekit_api_secret.get_secret_value(),
-                    room=body.livekit_room, session_id=body.session_id,
+                    settings.livekit_api_key,
+                    settings.livekit_api_secret.get_secret_value(),
+                    room=body.livekit_room,
+                    session_id=body.session_id,
                 )
                 try:
                     await streamer.start(settings.livekit_url, token)
@@ -146,8 +157,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             starting -= 1
         log.info("sandbox_started", sandbox_id=sid, session_id=body.session_id)
-        return StartOut(sandbox_id=sid, url=sandbox.page.url, title=await sandbox.page.title(),
-                        streaming=streamer is not None)
+        return StartOut(
+            sandbox_id=sid,
+            url=sandbox.page.url,
+            title=await sandbox.page.title(),
+            streaming=streamer is not None,
+        )
 
     @app.post("/v1/sandboxes/{sandbox_id}/tools/{tool}", response_model=ToolResult)
     async def run_tool(sandbox_id: str, tool: str, body: ToolIn, _: Auth) -> ToolResult:

@@ -20,7 +20,12 @@ def default_migrations_dir() -> Path:
     return Path(__file__).resolve().parents[4] / "db" / "migrations"
 
 
+def _load(directory: Path) -> list[tuple[str, str]]:
+    return [(p.name, p.read_text()) for p in sorted(directory.glob("*.sql"))]
+
+
 async def migrate(dsn: str, directory: Path) -> list[str]:
+    files = await asyncio.to_thread(_load, directory)
     conn = await asyncpg.connect(dsn)
     applied: list[str] = []
     try:
@@ -29,20 +34,24 @@ async def migrate(dsn: str, directory: Path) -> list[str]:
             "CREATE TABLE IF NOT EXISTS schema_migrations ("
             " name text PRIMARY KEY, sha256 text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())"
         )
-        done = {r["name"]: r["sha256"] for r in await conn.fetch("SELECT name, sha256 FROM schema_migrations")}
-        for path in sorted(directory.glob("*.sql")):
-            sql = path.read_text()
+        done = {
+            r["name"]: r["sha256"]
+            for r in await conn.fetch("SELECT name, sha256 FROM schema_migrations")
+        }
+        for name, sql in files:
             digest = hashlib.sha256(sql.encode()).hexdigest()
-            if path.name in done:
-                if done[path.name] != digest:
-                    raise RuntimeError(f"{path.name} changed after it was applied; add a new migration")
+            if name in done:
+                if done[name] != digest:
+                    raise RuntimeError(f"{name} changed after it was applied; add a new migration")
                 continue
             async with conn.transaction():
                 await conn.execute(sql)
                 await conn.execute(
-                    "INSERT INTO schema_migrations (name, sha256) VALUES ($1, $2)", path.name, digest
+                    "INSERT INTO schema_migrations (name, sha256) VALUES ($1, $2)",
+                    name,
+                    digest,
                 )
-            applied.append(path.name)
+            applied.append(name)
     finally:
         await conn.execute("SELECT pg_advisory_unlock($1)", _LOCK_ID)
         await conn.close()

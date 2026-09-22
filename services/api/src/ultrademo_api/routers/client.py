@@ -178,7 +178,9 @@ async def _create_context_link(
             "SELECT id, slug, status FROM launch_configs WHERE slug = $1", body.launch_config_slug
         )
         if lc is None:
-            raise ApiError(404, "not_found", f"No launch config with slug {body.launch_config_slug!r}")
+            raise ApiError(
+                404, "not_found", f"No launch config with slug {body.launch_config_slug!r}"
+            )
         if lc["status"] == "archived":
             raise ApiError(409, "archived", "That launch config is archived")
         link_id = await conn.fetchval(
@@ -271,7 +273,8 @@ async def list_sessions(
     after_ts, after_id = decode_cursor(cursor) if cursor else (None, None)
     async with db.tenant(principal.org_id) as conn:
         rows = await conn.fetch(
-            f"SELECT {_SESSION_COLS} FROM sessions s JOIN launch_configs lc ON lc.id = s.launch_config_id"
+            # _SESSION_COLS is a module constant; every value is a bind parameter.
+            f"SELECT {_SESSION_COLS} FROM sessions s JOIN launch_configs lc ON lc.id = s.launch_config_id"  # noqa: S608
             " WHERE ($1::text IS NULL OR s.type = $1)"
             "   AND ($2::timestamptz IS NULL OR s.started_at >= $2)"
             "   AND ($3::timestamptz IS NULL OR s.started_at < $3)"
@@ -301,7 +304,7 @@ async def get_session(
 ) -> SessionDetail:
     async with db.tenant(principal.org_id) as conn:
         r = await conn.fetchrow(
-            f"SELECT {_SESSION_COLS}, s.locale, s.params, s.form, s.summary, s.end_reason,"
+            f"SELECT {_SESSION_COLS}, s.locale, s.params, s.form, s.summary, s.end_reason,"  # noqa: S608
             " cl.context,"
             " (SELECT coalesce(sum(usd), 0) FROM cost_ledger c WHERE c.session_id = s.id) AS cost_usd,"
             " (SELECT count(*) FROM agent_actions a WHERE a.session_id = s.id) AS actions"

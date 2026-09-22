@@ -1,7 +1,6 @@
 import re
 
 import pytest
-
 from ultrademo_operator.policy import Policy
 from ultrademo_operator.sandbox import Sandbox, SandboxConfig, host_allowed, parse_elements
 from ultrademo_protocol import PolicyClass
@@ -18,7 +17,9 @@ async def sandbox(browser, site_url):
     pw, b = browser
     sb = await Sandbox.launch(
         pw,
-        SandboxConfig(session_id="s1", start_url=f"{site_url}/index.html", allowed_domains=["127.0.0.1"]),
+        SandboxConfig(
+            session_id="s1", start_url=f"{site_url}/index.html", allowed_domains=["127.0.0.1"]
+        ),
         shared_browser=b,
     )
     yield sb
@@ -34,7 +35,9 @@ def test_host_allowed():
 
 
 def test_parse_elements():
-    els = parse_elements('- button "Save \\"deal\\"" [ref=e8] [box=289,84,75,21]\n- textbox "Name" [ref=e6]')
+    els = parse_elements(
+        '- button "Save \\"deal\\"" [ref=e8] [box=289,84,75,21]\n- textbox "Name" [ref=e6]'
+    )
     assert els["e8"].name == 'Save "deal"' and els["e8"].box == (289, 84, 75, 21)
     assert els["e6"].role == "textbox" and els["e6"].box is None
 
@@ -46,7 +49,9 @@ def test_policy_classes():
     assert p.classify("operate_click", "link", "Billing") == PolicyClass.BLOCKED
     assert p.classify("operate_click", "button", "Show forecast") == PolicyClass.BLOCKED
     assert p.classify("operate_hover", "link", "Billing") == PolicyClass.ALLOWED
-    assert p.classify("operate_type", "searchbox", "Search deals", submits=True) == PolicyClass.ALLOWED
+    assert (
+        p.classify("operate_type", "searchbox", "Search deals", submits=True) == PolicyClass.ALLOWED
+    )
 
 
 async def test_observe_click_and_type(sandbox):
@@ -81,7 +86,7 @@ async def test_confirmation_gate(sandbox, site_url):
     save = ref_for(r.snapshot, "button", "Save deal")
     r = await sandbox.execute("operate_click", {"ref": save}, confirmed=True)
     assert r.status == "ok"
-    assert 'status: Saved Won' in r.snapshot or "Saved Won" in r.snapshot
+    assert "status: Saved Won" in r.snapshot or "Saved Won" in r.snapshot
 
 
 async def test_blocked_and_offsite(sandbox):
@@ -91,7 +96,9 @@ async def test_blocked_and_offsite(sandbox):
     r = await sandbox.execute("operate_navigate", {"url": "https://evil.example/"})
     assert r.status == "blocked"
     # A click on an off-domain link is aborted by the route guard; the page stays on the product.
-    r = await sandbox.execute("operate_click", {"ref": ref_for(obs.snapshot, "link", "Partner portal")})
+    r = await sandbox.execute(
+        "operate_click", {"ref": ref_for(obs.snapshot, "link", "Partner portal")}
+    )
     assert sandbox.page.url.startswith("http://127.0.0.1")
 
 
@@ -114,6 +121,9 @@ async def test_errors_are_results_not_exceptions(sandbox):
 async def test_screenshot_and_highlight(sandbox):
     obs = await sandbox.execute("operate_observe", {"screenshot": True})
     assert obs.screenshot_jpeg_b64 and len(obs.screenshot_jpeg_b64) > 1000
-    r = await sandbox.execute("operate_highlight", {"ref": ref_for(obs.snapshot, "heading", "Deals"), "label": "Your pipeline"})
+    r = await sandbox.execute(
+        "operate_highlight",
+        {"ref": ref_for(obs.snapshot, "heading", "Deals"), "label": "Your pipeline"},
+    )
     assert r.status == "ok"
     assert await sandbox.page.evaluate("typeof window.__ultrademo.highlight") == "function"

@@ -23,10 +23,10 @@ from urllib.parse import urljoin, urlparse
 from playwright.async_api import Browser, BrowserContext, Page, Playwright, Route
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeout
-
-from ultrademo_operator.policy import Policy
 from ultrademo_protocol import PolicyClass, ToolResult, parse_tool_input
 from ultrademo_protocol.tools import OPERATOR_TOOLS
+
+from ultrademo_operator.policy import Policy
 
 _OVERLAY_JS = (Path(__file__).parent / "overlay.js").read_text()
 
@@ -103,18 +103,27 @@ class Sandbox:
 
     @classmethod
     async def launch(
-        cls, pw: Playwright, config: SandboxConfig, executable_path: str | None = None,
+        cls,
+        pw: Playwright,
+        config: SandboxConfig,
+        executable_path: str | None = None,
         shared_browser: Browser | None = None,
     ) -> "Sandbox":
         browser = shared_browser or await pw.chromium.launch(
             executable_path=executable_path, args=["--disable-dev-shm-usage"]
         )
         sandbox = cls(config, browser, owns_browser=shared_browser is None)
-        await sandbox._start()
+        try:
+            await sandbox._start()
+        except BaseException:
+            await sandbox.close()  # never leak a browser or context on a failed start
+            raise
         return sandbox
 
     async def _start(self) -> None:
         c = self.config
+        if not host_allowed(c.start_url, c.allowed_domains):
+            raise ValueError("start_url is outside allowed_domains")
         self._context = await self._browser.new_context(
             viewport={"width": c.width, "height": c.height},
             locale=c.locale,
@@ -128,8 +137,6 @@ class Sandbox:
         self.page = await self._context.new_page()
         # Registered after the main page exists, so only popups and new tabs reach the handler.
         self._context.on("page", self._on_new_page)
-        if not host_allowed(c.start_url, c.allowed_domains):
-            raise ValueError("start_url is outside allowed_domains")
         await self.page.goto(c.start_url, wait_until="domcontentloaded")
 
     async def _guard(self, route: Route) -> None:
@@ -182,7 +189,9 @@ class Sandbox:
 
     # --- actions -------------------------------------------------------------------------------
 
-    async def execute(self, tool: str, raw_input: dict[str, Any], confirmed: bool = False) -> ToolResult:
+    async def execute(
+        self, tool: str, raw_input: dict[str, Any], confirmed: bool = False
+    ) -> ToolResult:
         if tool not in OPERATOR_TOOLS:
             return ToolResult(status="error", summary=f"{tool} is not an operator tool")
         try:
@@ -215,8 +224,9 @@ class Sandbox:
             x, y, w, h = el.box
             await self.page.mouse.move(x + w / 2, y + h / 2, steps=12)
 
-    async def _after_change(self, summary: str, el: ElementInfo | None = None,
-                            policy: PolicyClass = PolicyClass.ALLOWED) -> ToolResult:
+    async def _after_change(
+        self, summary: str, el: ElementInfo | None = None, policy: PolicyClass = PolicyClass.ALLOWED
+    ) -> ToolResult:
         assert self.page is not None
         await self._settle()
         return ToolResult(
@@ -229,7 +239,9 @@ class Sandbox:
             policy=policy,
         )
 
-    async def _gate(self, tool: str, el: ElementInfo, confirmed: bool, *, submits: bool = False) -> ToolResult | None:
+    async def _gate(
+        self, tool: str, el: ElementInfo, confirmed: bool, *, submits: bool = False
+    ) -> ToolResult | None:
         cls = self.policy.classify(tool, el.role, el.name, submits=submits)
         if cls == PolicyClass.BLOCKED:
             return ToolResult(
@@ -264,8 +276,11 @@ class Sandbox:
         if tool == "operate_navigate":
             target = urljoin(page.url, args.url)
             if not host_allowed(target, self.config.allowed_domains):
-                return ToolResult(status="blocked", summary="That address is outside this product.",
-                                  policy=PolicyClass.BLOCKED)
+                return ToolResult(
+                    status="blocked",
+                    summary="That address is outside this product.",
+                    policy=PolicyClass.BLOCKED,
+                )
             await page.goto(target, wait_until="domcontentloaded")
             return await self._after_change(f"Opened {urlparse(target).path or '/'}")
 
@@ -286,21 +301,29 @@ class Sandbox:
         if tool == "operate_scroll" and args.ref is None:
             await page.mouse.wheel(0, args.dy)
             await asyncio.sleep(0.15)
-            return ToolResult(status="ok", summary=f"Scrolled {'down' if args.dy > 0 else 'up'}",
-                              url=page.url, snapshot=await self.snapshot())
+            return ToolResult(
+                status="ok",
+                summary=f"Scrolled {'down' if args.dy > 0 else 'up'}",
+                url=page.url,
+                snapshot=await self.snapshot(),
+            )
 
         el = self._element(args.ref)
         if el is None:
-            return ToolResult(status="error",
-                              summary=f"Unknown ref {args.ref}. Call operate_observe for fresh refs.")
+            return ToolResult(
+                status="error",
+                summary=f"Unknown ref {args.ref}. Call operate_observe for fresh refs.",
+            )
         loc = page.locator(f"aria-ref={args.ref}")
 
         if tool == "operate_highlight":
             await loc.scroll_into_view_if_needed()
             box = await loc.bounding_box()
             if box and self.config.draw_overlays:
-                await page.evaluate("b => window.__ultrademo && window.__ultrademo.highlight(b)",
-                                    {**box, "label": args.label or ""})
+                await page.evaluate(
+                    "b => window.__ultrademo && window.__ultrademo.highlight(b)",
+                    {**box, "label": args.label or ""},
+                )
             return ToolResult(status="ok", summary=f'Highlighted "{el.name}"', element=el.as_dict())
 
         if tool == "operate_hover":
@@ -310,15 +333,18 @@ class Sandbox:
 
         if tool == "operate_scroll":
             await loc.evaluate("(n, dy) => n.scrollBy({top: dy, behavior: 'instant'})", args.dy)
-            return ToolResult(status="ok", summary="Scrolled", url=page.url, snapshot=await self.snapshot())
+            return ToolResult(
+                status="ok", summary="Scrolled", url=page.url, snapshot=await self.snapshot()
+            )
 
         if tool == "operate_click":
             if gate := await self._gate(tool, el, confirmed):
                 return gate
             await self._pointer_to(el)
             await loc.click()
-            return await self._after_change(f'Clicked "{el.name}"', el,
-                                            self.policy.classify(tool, el.role, el.name))
+            return await self._after_change(
+                f'Clicked "{el.name}"', el, self.policy.classify(tool, el.role, el.name)
+            )
 
         if tool == "operate_type":
             if gate := await self._gate(tool, el, confirmed, submits=args.submit):

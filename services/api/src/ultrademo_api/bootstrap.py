@@ -30,7 +30,9 @@ async def bootstrap(dsn: str, spec: dict[str, Any]) -> dict[str, str]:
             org_id = await conn.fetchval(
                 "INSERT INTO organizations (slug, name, region) VALUES ($1, $2, $3)"
                 " ON CONFLICT (slug) DO UPDATE SET name = excluded.name RETURNING id",
-                org["slug"], org["name"], org.get("region", "us"),
+                org["slug"],
+                org["name"],
+                org.get("region", "us"),
             )
             await conn.execute("SET LOCAL ROLE ultrademo_app")
             await conn.execute("SELECT set_config('app.org_id', $1, true)", str(org_id))
@@ -38,30 +40,49 @@ async def bootstrap(dsn: str, spec: dict[str, Any]) -> dict[str, str]:
             product_id = await conn.fetchval(
                 "INSERT INTO products (org_id, name, base_url, allowed_domains)"
                 " VALUES ($1, $2, $3, $4) RETURNING id",
-                org_id, p["name"], p["base_url"], p["allowed_domains"],
+                org_id,
+                p["name"],
+                p["base_url"],
+                p["allowed_domains"],
             )
             a = spec["agent"]
             agent_id = await conn.fetchval(
                 "INSERT INTO agents (org_id, product_id, name) VALUES ($1, $2, $3) RETURNING id",
-                org_id, product_id, a["name"],
+                org_id,
+                product_id,
+                a["name"],
             )
             av_id = await conn.fetchval(
                 "INSERT INTO agent_versions (org_id, agent_id, version, system_prompt, voice, policy, model)"
                 " VALUES ($1, $2, 1, $3, $4, $5, $6) RETURNING id",
-                org_id, agent_id, a["system_prompt"], a.get("voice", {}), a.get("policy", {}),
+                org_id,
+                agent_id,
+                a["system_prompt"],
+                a.get("voice", {}),
+                a.get("policy", {}),
                 a.get("model", {}),
             )
             lc = spec["launch_config"]
             await conn.execute(
                 "INSERT INTO launch_configs (org_id, slug, name, description, status, agent_version_id,"
                 " ctas, embed_origins) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-                org_id, lc["slug"], lc["name"], lc.get("description", ""),
-                lc.get("status", "published"), av_id, lc.get("ctas", []), lc.get("embed_origins", []),
+                org_id,
+                lc["slug"],
+                lc["name"],
+                lc.get("description", ""),
+                lc.get("status", "published"),
+                av_id,
+                lc.get("ctas", []),
+                lc.get("embed_origins", []),
             )
             key = generate_api_key()
             await conn.execute(
                 "INSERT INTO api_keys (org_id, name, prefix, key_hash, scopes) VALUES ($1, $2, $3, $4, $5)",
-                org_id, "bootstrap", key.prefix, key.key_hash, spec.get("api_key_scopes", DEFAULT_SCOPES),
+                org_id,
+                "bootstrap",
+                key.prefix,
+                key.key_hash,
+                spec.get("api_key_scopes", DEFAULT_SCOPES),
             )
     finally:
         await conn.close()

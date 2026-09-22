@@ -3,7 +3,6 @@ import json
 import asyncpg
 import jwt
 import pytest
-
 from api_helpers import INTERNAL, bearer
 
 
@@ -23,7 +22,10 @@ async def test_scope_enforced(client, dsn, orgs):
     conn = await asyncpg.connect(dsn)
     await conn.execute(
         "INSERT INTO api_keys (org_id, name, prefix, key_hash, scopes) VALUES ($1, 'ro', $2, $3, $4)",
-        __import__("uuid").UUID(orgs["acme"]["org_id"]), key.prefix, key.key_hash, ["sessions:read"],
+        __import__("uuid").UUID(orgs["acme"]["org_id"]),
+        key.prefix,
+        key.key_hash,
+        ["sessions:read"],
     )
     await conn.close()
     r = await client.get("/v1/client/launch-configs", headers=bearer(key.plaintext))
@@ -54,13 +56,21 @@ async def test_context_link_and_demo_alias(client, orgs):
     )
     assert r.status_code == 201, r.text
     out = r.json()
-    assert out["url"] == f"https://ud.example/d/acme-demo?t={out['token']}" and len(out["token"]) == 16
+    assert (
+        out["url"] == f"https://ud.example/d/acme-demo?t={out['token']}" and len(out["token"]) == 16
+    )
 
-    r = await client.post("/v1/client/demos", headers=h, json={"demo_url_slug": "acme-demo", "first_name": "Lee"})
+    r = await client.post(
+        "/v1/client/demos", headers=h, json={"demo_url_slug": "acme-demo", "first_name": "Lee"}
+    )
     assert r.status_code == 201
 
     # Another org's slug is invisible, not forbidden.
-    r = await client.post("/v1/client/demos", headers=bearer(orgs["globex"]["api_key"]), json={"demo_url_slug": "acme-demo"})
+    r = await client.post(
+        "/v1/client/demos",
+        headers=bearer(orgs["globex"]["api_key"]),
+        json={"demo_url_slug": "acme-demo"},
+    )
     assert r.status_code == 404
 
 
@@ -88,7 +98,9 @@ async def _start(client, orgs, **extra):
         headers=bearer(orgs["acme"]["api_key"]),
         json={"launch_config_slug": "acme-demo", "context": {"deal": "renewal"}},
     )
-    r = await client.post("/v1/public/sessions", json={"slug": "acme-demo", "token": link.json()["token"], **extra})
+    r = await client.post(
+        "/v1/public/sessions", json={"slug": "acme-demo", "token": link.json()["token"], **extra}
+    )
     assert r.status_code == 201, r.text
     return r.json()
 
@@ -110,39 +122,79 @@ async def test_session_lifecycle(client, orgs, settings):
     assert ctx["context_link"]["context"] == {"deal": "renewal"}
     assert ctx["params"] == {"utm": "email"}
 
-    assert (await client.post(f"/v1/internal/sessions/{sid}/started", headers=INTERNAL)).status_code == 204
+    assert (
+        await client.post(f"/v1/internal/sessions/{sid}/started", headers=INTERNAL)
+    ).status_code == 204
     lines = [
-        {"seq": 0, "role": "agent", "content": "Hi, I'm Ava.", "started_at": "2026-09-22T10:00:00Z"},
-        {"seq": 1, "role": "participant", "content": "Show me approvals.", "started_at": "2026-09-22T10:00:05Z"},
-        {"seq": 2, "role": "participant", "content": "And pricing.", "started_at": "2026-09-22T10:00:30Z"},
+        {
+            "seq": 0,
+            "role": "agent",
+            "content": "Hi, I'm Ava.",
+            "started_at": "2026-09-22T10:00:00Z",
+        },
+        {
+            "seq": 1,
+            "role": "participant",
+            "content": "Show me approvals.",
+            "started_at": "2026-09-22T10:00:05Z",
+        },
+        {
+            "seq": 2,
+            "role": "participant",
+            "content": "And pricing.",
+            "started_at": "2026-09-22T10:00:30Z",
+        },
     ]
     for _ in range(2):  # retried batch must not duplicate
-        r = await client.post(f"/v1/internal/sessions/{sid}/transcript", headers=INTERNAL, json=lines)
+        r = await client.post(
+            f"/v1/internal/sessions/{sid}/transcript", headers=INTERNAL, json=lines
+        )
         assert r.status_code == 204
     r = await client.post(
         f"/v1/internal/sessions/{sid}/actions",
         headers=INTERNAL,
-        json=[{"seq": 0, "tool": "operate_click", "args": {"ref": "e4"}, "status": "ok",
-               "result_summary": "Opened Approvals", "latency_ms": 180}],
+        json=[
+            {
+                "seq": 0,
+                "tool": "operate_click",
+                "args": {"ref": "e4"},
+                "status": "ok",
+                "result_summary": "Opened Approvals",
+                "latency_ms": 180,
+            }
+        ],
     )
     assert r.status_code == 204
     r = await client.post(
         f"/v1/internal/sessions/{sid}/cost",
         headers=INTERNAL,
-        json=[{"item": "llm_in", "qty": 12000, "usd": "0.06", "rate_card_version": "2026-09"},
-              {"item": "llm_cache_read", "qty": 300000, "usd": "0.15", "rate_card_version": "2026-09"}],
+        json=[
+            {"item": "llm_in", "qty": 12000, "usd": "0.06", "rate_card_version": "2026-09"},
+            {
+                "item": "llm_cache_read",
+                "qty": 300000,
+                "usd": "0.15",
+                "rate_card_version": "2026-09",
+            },
+        ],
     )
     assert r.status_code == 204
     r = await client.post(
         f"/v1/internal/sessions/{sid}/ended",
         headers=INTERNAL,
-        json={"reason": "agent_ended", "summary": "Interested in approvals.", "participant_turns": 2},
+        json={
+            "reason": "agent_ended",
+            "summary": "Interested in approvals.",
+            "participant_turns": 2,
+        },
     )
     assert r.status_code == 204
 
     h = bearer(orgs["acme"]["api_key"])
     detail = (await client.get(f"/v1/client/sessions/{sid}", headers=h)).json()
-    assert detail["status"] == "ended" and detail["is_valid"] is True and detail["participant_joined"]
+    assert (
+        detail["status"] == "ended" and detail["is_valid"] is True and detail["participant_joined"]
+    )
     assert detail["duration_seconds"] is not None and detail["actions"] == 1
     assert detail["cost_usd"] == pytest.approx(0.21)
     assert detail["context"] == {"deal": "renewal"}
@@ -176,7 +228,9 @@ async def test_rls_blocks_cross_tenant_reads(dsn, orgs):
         async with conn.transaction():
             await conn.execute("SET LOCAL ROLE ultrademo_app")
             assert await conn.fetchval("SELECT count(*) FROM sessions") == 0  # no tenant set
-            await conn.execute("SELECT set_config('app.org_id', $1, true)", orgs["globex"]["org_id"])
+            await conn.execute(
+                "SELECT set_config('app.org_id', $1, true)", orgs["globex"]["org_id"]
+            )
             assert await conn.fetchval("SELECT count(*) FROM launch_configs") == 1
             assert await conn.fetchval("SELECT count(*) FROM sessions") == 0
             with pytest.raises(asyncpg.InsufficientPrivilegeError):

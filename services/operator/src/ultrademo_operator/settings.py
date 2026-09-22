@@ -5,7 +5,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="ULTRADEMO_OPERATOR_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="ULTRADEMO_OPERATOR_", env_file=".env", extra="ignore"
+    )
 
     internal_token: SecretStr = SecretStr("dev-internal-token")
     # Point at a preinstalled Chromium when the Playwright-managed build is absent.
