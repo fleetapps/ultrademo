@@ -70,9 +70,3 @@ async def client(settings, orgs):
         yield c
     await db.close()
 
-
-def bearer(key: str) -> dict[str, str]:
-    return {"authorization": f"Bearer {key}"}
-
-
-INTERNAL = bearer("test-internal")

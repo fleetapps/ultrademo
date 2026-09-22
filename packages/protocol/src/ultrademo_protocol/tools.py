@@ -26,6 +26,10 @@ class PolicyClass(StrEnum):
     BLOCKED = "blocked"
 
 
+# Playwright AI-mode refs: `e12` in the main frame, `f1e12` inside frame 1.
+REF_PATTERN = r"^(f\d{1,4})?e\d{1,6}$"
+
+
 class _Input(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -39,7 +43,7 @@ class NavigateInput(_Input):
 
 
 class RefInput(_Input):
-    ref: str = Field(pattern=r"^[a-z]\d{1,6}$")
+    ref: str = Field(pattern=REF_PATTERN)
 
 
 class ClickInput(RefInput):
@@ -65,7 +69,7 @@ class PressInput(_Input):
 
 class ScrollInput(_Input):
     dy: int = Field(ge=-5000, le=5000)
-    ref: str | None = Field(default=None, pattern=r"^[a-z]\d{1,6}$")
+    ref: str | None = Field(default=None, pattern=REF_PATTERN)
 
 
 class HighlightInput(RefInput):
@@ -138,9 +142,10 @@ _DEFINITIONS: list[dict[str, Any]] = [
     {
         "name": "operate_click",
         "description": (
-            "Click an element. The viewer sees the cursor move to it first. Actions that change data "
-            "(save, delete, send, pay) may need the viewer's confirmation; if the result says "
-            "needs_confirmation, ask the viewer and wait."
+            "Click an element. The viewer sees the cursor move to it first. Clicks that change data "
+            "(save, delete, send, pay) are shown to the viewer for approval before they run; if the "
+            "viewer declines, the result says so and nothing changed. Some actions are blocked for "
+            "demos; say so plainly and move on."
         ),
         "input_schema": {
             "type": "object",
@@ -291,7 +296,7 @@ class ToolResult(BaseModel):
     url: str | None = None
     title: str | None = None
     snapshot: str | None = None
-    screenshot_png_b64: str | None = None
+    screenshot_jpeg_b64: str | None = None
     element: dict[str, Any] | None = None
     policy: PolicyClass = PolicyClass.ALLOWED
     latency_ms: int = 0

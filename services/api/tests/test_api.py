@@ -4,7 +4,7 @@ import asyncpg
 import jwt
 import pytest
 
-from conftest import INTERNAL, bearer
+from api_helpers import INTERNAL, bearer
 
 
 async def test_auth_required(client):
