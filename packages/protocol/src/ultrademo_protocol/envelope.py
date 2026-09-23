@@ -2,6 +2,12 @@
 
 State that late joiners need lives in participant attributes; transcripts go over text streams;
 discrete events go over reliable data packets wrapped in `Envelope`; request/response goes over RPC.
+
+Transcripts and typed chat use LiveKit Agents' own text-stream topics rather than ours: the agent
+framework already publishes every agent and viewer transcript segment on `lk.transcription` (with
+`lk.segment_id` / `lk.transcription_final` attributes) and reads viewer chat from `lk.chat`
+(livekit-agents 1.8 `voice/room_io`). Re-publishing them on a second topic would double the traffic.
+The web player mirrors these constants in `apps/web/src/lib/protocol.ts`.
 """
 
 import time
@@ -11,9 +17,16 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 TOPIC_EVENTS = "ultrademo.events"
-TOPIC_TRANSCRIPT = "ultrademo.transcript"
+TOPIC_TRANSCRIPTION = "lk.transcription"
+TOPIC_CHAT = "lk.chat"
+# LiveKit Agents' own attributes on `lk.transcription` streams (livekit/agents/types.py).
+ATTR_SEGMENT_ID = "lk.segment_id"
+ATTR_TRANSCRIPTION_FINAL = "lk.transcription_final"
 ATTR_AGENT_STATE = "ultrademo.agent_state"
+# On the sandbox participant: JSON `{"viewport": {"w": int, "h": int}}`, the coordinate space of
+# every overlay event and of the pointer RPC.
 ATTR_SCREEN_META = "ultrademo.screen_meta"
+ATTR_KIND = "ultrademo.kind"
 RPC_CONFIRM = "ultrademo.confirm"
 RPC_POINTER = "ultrademo.pointer"
 

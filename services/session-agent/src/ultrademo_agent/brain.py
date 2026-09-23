@@ -134,6 +134,7 @@ class Brain:
         self._unreported = Usage()
         self.served_model = self.config.model
         self.ended = False
+        self._notes: list[str] = []
 
     # --- request -------------------------------------------------------------------------------
 
@@ -175,9 +176,21 @@ class Brain:
 
     # --- turn ----------------------------------------------------------------------------------
 
+    def note(self, text: str) -> None:
+        """Queue a fact for the model's next turn (e.g. what the viewer is pointing at).
+
+        Notes ride along with the next user message instead of becoming their own turn, so they
+        never trigger a model call by themselves. Only the latest few are kept.
+        """
+        self._notes = [*self._notes[-2:], text]
+
     async def respond(self, user_text: str | None) -> AsyncIterator[str | _Flush]:
         """Handle one viewer turn (or the join, when `user_text` is None)."""
-        self.messages.append({"role": "user", "content": user_text or KICKOFF})
+        content = user_text or KICKOFF
+        if self._notes:
+            content = "\n".join([*self._notes, content])
+            self._notes.clear()
+        self.messages.append({"role": "user", "content": content})
         for _ in range(self.config.max_tool_rounds):
             spoken: list[str] = []
             try:

@@ -12,6 +12,7 @@ from ultrademo_api.settings import Settings, get_settings
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
+    settings.check_secrets()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

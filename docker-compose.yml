@@ -1,7 +1,8 @@
-# Local stack: everything a demo needs except the browser player UI.
+# Local stack: a whole demo, from the player page to the product sandbox.
 #   cp .env.example .env   # add ANTHROPIC_API_KEY, DEEPGRAM_API_KEY, ELEVEN_API_KEY
 #   docker compose up --build
 #   docker compose exec api python -m ultrademo_api.bootstrap examples/acme.json
+#   open http://localhost:3000/d/acme-crm-demo
 name: ultrademo
 
 x-internal: &internal
@@ -36,6 +37,7 @@ services:
       ULTRADEMO_LIVEKIT_URL: ws://localhost:7880
       ULTRADEMO_LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
       ULTRADEMO_LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      ULTRADEMO_RECEIPT_SECRET: ${ULTRADEMO_RECEIPT_SECRET:?set it in .env}
     ports: ["8000:8000"]
     depends_on: {postgres: {condition: service_healthy}}
 
@@ -63,6 +65,16 @@ services:
       DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:?set it in .env}
       ELEVEN_API_KEY: ${ELEVEN_API_KEY:?set it in .env}
     depends_on: [api, operator, livekit]
+
+  # The player the viewer opens. It calls the api server side only.
+  web:
+    build: {context: ./apps/web, dockerfile: ../../infra/docker/web.Dockerfile}
+    environment:
+      ULTRADEMO_API_URL: http://api:8000
+      # The browser connects from the host; the page's CSP allows this address.
+      ULTRADEMO_LIVEKIT_URL: ws://localhost:7880
+    ports: ["3000:3000"]
+    depends_on: [api]
 
   # A small fake CRM the agent can demo end to end without customer credentials.
   sample-product:

@@ -15,7 +15,7 @@ ADMIN_DSN = os.environ.get(
 )
 
 
-def spec(slug: str, status: str = "published") -> dict:
+def spec(slug: str, status: str = "published", **launch_config) -> dict:
     return {
         "organization": {"slug": slug, "name": slug.title()},
         "product": {
@@ -29,6 +29,7 @@ def spec(slug: str, status: str = "published") -> dict:
             "name": f"{slug} demo",
             "status": status,
             "ctas": [{"kind": "book", "label": "Book a call", "url": "https://cal.example/x"}],
+            **launch_config,
         },
     }
 
@@ -53,6 +54,26 @@ async def orgs(dsn):
         "acme": await bootstrap(dsn, spec("acme")),
         "globex": await bootstrap(dsn, spec("globex")),
         "draft": await bootstrap(dsn, spec("initech", status="draft")),
+        "hooli": await bootstrap(
+            dsn,
+            spec(
+                "hooli",
+                status="testing",
+                form_schema={
+                    "fields": [
+                        {"name": "email", "label": "Work email", "type": "email", "required": True},
+                        {
+                            "name": "team",
+                            "label": "Team",
+                            "type": "select",
+                            "options": ["Sales", "Support"],
+                        },
+                    ]
+                },
+                branding={"accent": "#1a7f5a", "logo_url": "javascript:alert(1)"},
+                embed_origins=["https://www.hooli.example"],
+            ),
+        ),
     }
 
 

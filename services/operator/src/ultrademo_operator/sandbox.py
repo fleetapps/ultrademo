@@ -15,20 +15,32 @@ import asyncio
 import base64
 import re
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
-from playwright.async_api import Browser, BrowserContext, Page, Playwright, Route
+import structlog
+from playwright.async_api import Browser, BrowserContext, Locator, Page, Playwright, Route
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeout
-from ultrademo_protocol import PolicyClass, ToolResult, parse_tool_input
+from ultrademo_protocol import EventType, PolicyClass, ToolResult, parse_tool_input
 from ultrademo_protocol.tools import OPERATOR_TOOLS
 
 from ultrademo_operator.policy import Policy
 
+log = structlog.get_logger()
+
 _OVERLAY_JS = (Path(__file__).parent / "overlay.js").read_text()
+
+# Receives overlay events (`overlay.cursor`, `overlay.highlight`, `overlay.clear`) for the player to
+# draw (ADR 4). The screen streamer publishes them into the LiveKit room.
+OverlaySink = Callable[[EventType, dict[str, Any]], Awaitable[None]]
+
+# Roles a viewer can meaningfully point at, most specific first when boxes nest.
+_POINTABLE_SKIP = {"generic", "none", "presentation", "document", "main", "region", "group"}
+HIGHLIGHT_TTL_MS = 4_000
 
 # `- button "Save deal" [ref=e8] [box=289,84,75,21]` and variants without a name or box.
 _LINE_RE = re.compile(
@@ -49,6 +61,8 @@ class SandboxConfig:
     height: int = 720
     locale: str = "en-US"
     action_timeout_ms: int = 8_000
+    # True draws the cursor and highlights into the page itself, so they show up in the video.
+    # The player draws them client-side from overlay events, so the agent turns this off.
     draw_overlays: bool = True
 
 
@@ -58,6 +72,8 @@ class ElementInfo:
     role: str
     name: str
     box: tuple[int, int, int, int] | None
+    # Inside an iframe: its box is relative to that frame, not to the page.
+    in_frame: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"ref": self.ref, "role": self.role, "name": self.name}
@@ -78,13 +94,23 @@ def host_allowed(url: str, allowed: list[str]) -> bool:
 
 def parse_elements(snapshot: str) -> dict[str, ElementInfo]:
     out: dict[str, ElementInfo] = {}
+    # Indents of the iframe lines enclosing the current line. A frame's contents are nested
+    # under its `- iframe` line, and their boxes come from that frame's own viewport. The ref
+    # prefix can't tell: Playwright gives every frame but the first a prefix (`f<seq>`), and the
+    # main frame gets one too once it has navigated.
+    frames: list[int] = []
     for line in snapshot.splitlines():
         m = _LINE_RE.match(line)
         if not m:
             continue
+        indent = len(line) - len(line.lstrip())
+        while frames and indent <= frames[-1]:
+            frames.pop()
         box = tuple(int(v) for v in m["box"].split(",")) if m["box"] else None
         name = (m["name"] or "").replace('\\"', '"')
-        out[m["ref"]] = ElementInfo(m["ref"], m["role"], name, box)  # type: ignore[arg-type]
+        out[m["ref"]] = ElementInfo(m["ref"], m["role"], name, box, bool(frames))  # type: ignore[arg-type]
+        if m["role"] == "iframe":
+            frames.append(indent)
     return out
 
 
@@ -100,6 +126,9 @@ class Sandbox:
         self._lock = asyncio.Lock()
         self.last_used = time.monotonic()
         self.started_at = time.monotonic()
+        self.on_overlay: OverlaySink | None = None
+        self._url_before = ""
+        self._highlight_seq = 0
 
     @classmethod
     async def launch(
@@ -217,18 +246,68 @@ class Sandbox:
     def _element(self, ref: str) -> ElementInfo | None:
         return self._elements.get(ref)
 
-    async def _pointer_to(self, el: ElementInfo) -> None:
-        """Glide the real mouse to the element so the viewer sees where the agent is going."""
+    async def _overlay(self, type_: EventType, **payload: Any) -> None:
+        if self.on_overlay is None:
+            return
+        payload.update(screen_w=self.config.width, screen_h=self.config.height)
+        try:
+            await self.on_overlay(type_, payload)
+        except Exception as e:  # noqa: BLE001 - an overlay must never fail the action
+            log.warning("overlay_publish_failed", error=str(e)[:200])
+
+    async def _pointer_to(self, el: ElementInfo, loc: Locator, *, click: bool = False) -> None:
+        """Glide the mouse to the element so the viewer sees where the agent is going.
+
+        The box is measured now, after scrolling, in page coordinates: the snapshot's boxes can
+        be stale once the page has scrolled, and are relative to their own frame.
+        """
         assert self.page is not None
-        if el.box:
-            x, y, w, h = el.box
-            await self.page.mouse.move(x + w / 2, y + h / 2, steps=12)
+        try:
+            await loc.scroll_into_view_if_needed(timeout=2_000)
+            box = await loc.bounding_box(timeout=2_000)
+        except PlaywrightError:
+            box = None
+        if not box:
+            return
+        cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+        await self._overlay(
+            EventType.OVERLAY_CURSOR, x=round(cx), y=round(cy), kind="move", ref=el.ref
+        )
+        await self.page.mouse.move(cx, cy, steps=12)
+        if click:
+            await self._overlay(
+                EventType.OVERLAY_CURSOR, x=round(cx), y=round(cy), kind="click", ref=el.ref
+            )
+
+    async def element_at(self, x: float, y: float) -> ElementInfo | None:
+        """The element under a viewport point, as the agent would address it (a fresh ref).
+
+        Used when the viewer points at the shared screen ("what's this?"). Hit-testing the
+        snapshot's boxes, rather than `elementFromPoint`, returns the same role, name and ref the
+        model sees in `operate_observe`, so it can act on the answer directly.
+        """
+        async with self._lock:
+            self.last_used = time.monotonic()
+            await self.snapshot()
+            best: ElementInfo | None = None
+            best_area = float("inf")
+            for el in self._elements.values():
+                # Boxes of elements inside iframes are relative to their frame.
+                if el.box is None or el.role in _POINTABLE_SKIP or el.in_frame:
+                    continue
+                bx, by, bw, bh = el.box
+                if bx <= x <= bx + bw and by <= y <= by + bh and bw * bh < best_area:
+                    best, best_area = el, bw * bh
+            return best
 
     async def _after_change(
         self, summary: str, el: ElementInfo | None = None, policy: PolicyClass = PolicyClass.ALLOWED
     ) -> ToolResult:
         assert self.page is not None
         await self._settle()
+        if self.page.url != self._url_before:
+            # A new page: the old highlight and cursor no longer point at anything.
+            await self._overlay(EventType.OVERLAY_CLEAR)
         return ToolResult(
             status="ok",
             summary=summary,
@@ -261,6 +340,7 @@ class Sandbox:
 
     async def _run(self, tool: str, args: Any, confirmed: bool) -> ToolResult:
         page = self.page
+        self._url_before = page.url if page else ""
         assert page is not None
 
         if tool == "operate_observe":
@@ -281,6 +361,7 @@ class Sandbox:
                     summary="That address is outside this product.",
                     policy=PolicyClass.BLOCKED,
                 )
+            await self._overlay(EventType.OVERLAY_CLEAR)
             await page.goto(target, wait_until="domcontentloaded")
             return await self._after_change(f"Opened {urlparse(target).path or '/'}")
 
@@ -299,6 +380,7 @@ class Sandbox:
             return await self._after_change(f"Pressed {args.keys}")
 
         if tool == "operate_scroll" and args.ref is None:
+            await self._overlay(EventType.OVERLAY_CLEAR)
             await page.mouse.wheel(0, args.dy)
             await asyncio.sleep(0.15)
             return ToolResult(
@@ -324,14 +406,29 @@ class Sandbox:
                     "b => window.__ultrademo && window.__ultrademo.highlight(b)",
                     {**box, "label": args.label or ""},
                 )
+            if box:
+                self._highlight_seq += 1
+                await self._overlay(
+                    EventType.OVERLAY_HIGHLIGHT,
+                    id=f"hl_{self._highlight_seq}",
+                    bbox={
+                        "x": round(box["x"]),
+                        "y": round(box["y"]),
+                        "w": round(box["width"]),
+                        "h": round(box["height"]),
+                    },
+                    label=args.label or "",
+                    ttl_ms=HIGHLIGHT_TTL_MS,
+                )
             return ToolResult(status="ok", summary=f'Highlighted "{el.name}"', element=el.as_dict())
 
         if tool == "operate_hover":
-            await self._pointer_to(el)
+            await self._pointer_to(el, loc)
             await loc.hover()
             return await self._after_change(f'Hovered "{el.name}"', el)
 
         if tool == "operate_scroll":
+            await self._overlay(EventType.OVERLAY_CLEAR)
             await loc.evaluate("(n, dy) => n.scrollBy({top: dy, behavior: 'instant'})", args.dy)
             return ToolResult(
                 status="ok", summary="Scrolled", url=page.url, snapshot=await self.snapshot()
@@ -340,7 +437,7 @@ class Sandbox:
         if tool == "operate_click":
             if gate := await self._gate(tool, el, confirmed):
                 return gate
-            await self._pointer_to(el)
+            await self._pointer_to(el, loc, click=True)
             await loc.click()
             return await self._after_change(
                 f'Clicked "{el.name}"', el, self.policy.classify(tool, el.role, el.name)
@@ -349,14 +446,14 @@ class Sandbox:
         if tool == "operate_type":
             if gate := await self._gate(tool, el, confirmed, submits=args.submit):
                 return gate
-            await self._pointer_to(el)
+            await self._pointer_to(el, loc)
             await loc.fill(args.text)
             if args.submit:
                 await loc.press("Enter")
             return await self._after_change(f'Typed into "{el.name}"', el)
 
         if tool == "operate_select":
-            await self._pointer_to(el)
+            await self._pointer_to(el, loc)
             if el.role == "combobox":
                 try:
                     await loc.select_option(label=args.value)

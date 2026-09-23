@@ -17,6 +17,8 @@
     "name": "Acme CRM live demo",
     "description": "Talk to Ava and see Acme CRM in action.",
     "status": "published",
-    "ctas": [{"kind": "book", "label": "Book a call with sales", "url": "https://cal.example/acme"}]
+    "ctas": [{"kind": "book", "label": "Book a call with sales", "url": "https://cal.example/acme"}],
+    "form_schema": {"fields": [{"name": "email", "label": "Work email", "type": "email", "required": true}]},
+    "branding": {"accent": "#0f7f82"}
   }
 }

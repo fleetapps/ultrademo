@@ -315,3 +315,16 @@ async def test_cost_ledger_rows():
     assert rows["llm_in"]["usd"] == "0.000500" and rows["llm_cache_read"]["usd"] == "0.002500"
     assert rows["llm_out"]["usd"] == "0.000500"
     assert b.take_usage().ledger("claude-opus-5") == []
+
+
+async def test_notes_ride_along_with_the_next_turn():
+    client = FakeClient([message([text("That's the approvals link.")], "end_turn")] * 2)
+    b = brain(client)
+    for i in range(4):
+        b.note(f"[note {i}]")
+    await collect(b.respond("What is this?"))
+    first = client.calls[0]["messages"][-1]
+    # Only the latest three notes are kept, in order, ahead of what the viewer said.
+    assert first == {"role": "user", "content": "[note 1]\n[note 2]\n[note 3]\nWhat is this?"}
+    await collect(b.respond("And this?"))
+    assert client.calls[1]["messages"][-1]["content"] == "And this?"

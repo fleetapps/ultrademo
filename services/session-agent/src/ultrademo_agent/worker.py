@@ -30,12 +30,14 @@ from livekit.agents import (
     TurnHandlingOptions,
     inference,
     llm,
+    room_io,
 )
 from livekit.agents.types import FlushSentinel
 from livekit.plugins import deepgram, elevenlabs, silero
 from ultrademo_protocol import (
     ATTR_AGENT_STATE,
     RPC_CONFIRM,
+    RPC_POINTER,
     TOPIC_EVENTS,
     AgentState,
     Envelope,
@@ -45,6 +47,7 @@ from ultrademo_protocol.envelope import EventType
 
 from ultrademo_agent.brain import FLUSH, Brain, BrainConfig
 from ultrademo_agent.clients import ApiClient, OperatorClient
+from ultrademo_agent.pointer import Pointer
 from ultrademo_agent.prompt import session_system, static_system
 from ultrademo_agent.settings import Settings, get_settings
 
@@ -86,10 +89,8 @@ class RoomHooks:
         self.handoff_requested = False
 
     def _viewer(self) -> str | None:
-        for identity in self._room.remote_participants:
-            if identity.startswith("viewer_"):
-                return identity
-        return None
+        identity = f"viewer_{self._session_id}"
+        return identity if identity in self._room.remote_participants else None
 
     async def publish(self, type_: EventType, **payload: Any) -> None:
         self._seq += 1
@@ -273,6 +274,8 @@ async def entrypoint(ctx: JobContext) -> None:
         allowed_domains=sc["product"]["allowed_domains"],
         policy=sc["agent_version"].get("policy") or {},
         livekit_room=ctx.room.name,
+        # The player draws the cursor and highlights from the operator's overlay events (ADR 4).
+        draw_overlays=False,
     )
 
     voice = sc["agent_version"].get("voice") or {}
@@ -323,7 +326,31 @@ async def entrypoint(ctx: JobContext) -> None:
                 except Exception as e:  # noqa: BLE001
                     log.warning("persist_cost_failed", error=str(e)[:200])
 
-    await session.start(room=ctx.room, agent=DemoAgent(brain))
+    viewer = f"viewer_{session_id}"
+    await session.start(
+        room=ctx.room,
+        agent=DemoAgent(brain),
+        room_options=room_io.RoomOptions(
+            # Listen to the viewer only, never to the sandbox participant or a late joiner.
+            participant_identity=viewer,
+            # Deleting the room ends the sandbox's stream and the viewer's connection at once.
+            delete_room_on_close=True,
+        ),
+    )
+
+    async def ask(text: str) -> None:
+        try:
+            await session.interrupt()
+        except RuntimeError:
+            pass  # the current speech cannot be interrupted; the question queues behind it
+        session.generate_reply(user_input=text)
+
+    pointer = Pointer(operator, brain, ask, viewer_identity=viewer)
+
+    @ctx.room.local_participant.register_rpc_method(RPC_POINTER)
+    async def _on_pointer(data: rtc.RpcInvocationData) -> str:
+        return await pointer.handle(data.caller_identity, data.payload)
+
     await api.started()
     session.generate_reply()  # llm_node sees no new viewer message and greets
 
@@ -350,4 +377,5 @@ async def entrypoint(ctx: JobContext) -> None:
     finally:
         ticker.cancel()
         await hooks.publish(EventType.SESSION_STATUS, status="ended", reason=end_reason)
+        await hooks.state(AgentState.ENDED)
         ctx.shutdown(reason=end_reason)

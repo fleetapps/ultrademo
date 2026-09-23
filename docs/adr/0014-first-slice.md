@@ -9,7 +9,7 @@ Revisit when an operator tool starts streaming sub-actions (`operate_run_workflo
 ## 2. The Claude brain owns generation inside LiveKit's `llm_node`
 LiveKit's function-tool layer would hide the request shape we depend on for cost: cache breakpoints, context editing, fallbacks and per-message effort. So we override `Agent.llm_node`, which LiveKit documents for this purpose, and run our own tool loop. `AgentSession` gets a placeholder `llm.LLM` only because the pipeline skips generation when `llm` is unset (`agent_activity.py`, livekit-agents 1.8.2).
 
-## 3. Overlays are drawn in the page for now
+## 3. Overlays are drawn in the page for now (superseded by ADR 15 §1)
 ADR 4 prefers client-drawn overlays. The player doesn't exist yet, so the operator injects a cursor and highlight into a closed shadow root with `pointer-events: none`, and they are visible in the streamed video. Results also carry the element's bounding box, so the player can take over. Drawing in-page can be switched off per sandbox (`draw_overlays`).
 Revisit when `apps/web` ships.
 

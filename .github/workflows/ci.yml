@@ -7,6 +7,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     services:
       postgres:
         image: pgvector/pgvector:0.8.6-pg18
@@ -27,3 +28,84 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q
+
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # pnpm comes from the packageManager field in apps/web/package.json.
+      - run: corepack enable pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run typecheck
+      - run: pnpm run test
+      - run: pnpm run build
+
+  # A whole demo call in a browser: real LiveKit server, api, operator and player, with the
+  # scripted agent from e2e/scripted_agent.py in place of the voice pipeline and Claude.
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-retries 30
+    env:
+      ULTRADEMO_TEST_ADMIN_DSN: postgresql://postgres:postgres@localhost:5432/postgres
+      LIVEKIT_VERSION: 1.13.7
+      LIVEKIT_SHA256: 6634aeeb2fb1366b6723708ae4320b9d5408106a4c63457c5e845ae3979c90e2
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: corepack enable pnpm
+      - name: Install livekit-server
+        run: |
+          curl -sSfL -o livekit.tgz \
+            "https://github.com/livekit/livekit/releases/download/v${LIVEKIT_VERSION}/livekit_${LIVEKIT_VERSION}_linux_amd64.tar.gz"
+          echo "${LIVEKIT_SHA256}  livekit.tgz" | sha256sum -c -
+          mkdir -p "$HOME/bin" && tar -xzf livekit.tgz -C "$HOME/bin" livekit-server
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+      - run: uv sync --locked --all-packages
+      # The operator's browser (Python Playwright) and the test's browser (Playwright Test).
+      - run: uv run playwright install --with-deps chromium
+      - working-directory: apps/web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+          pnpm run build
+          pnpm run e2e
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+          retention-days: 7
+
+  # Every image builds (not pushed yet: deploy is a later slice).
+  images:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build -f infra/docker/python-service.Dockerfile --build-arg PACKAGE=ultrademo-api .
+      - run: docker build -f infra/docker/operator.Dockerfile .
+      - run: docker build -f infra/docker/agent.Dockerfile .
+      - run: docker build -f infra/docker/web.Dockerfile apps/web

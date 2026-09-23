@@ -2,6 +2,7 @@
 
     POST   /v1/sandboxes                     start a browser for a session (optionally streaming it)
     POST   /v1/sandboxes/{id}/tools/{tool}   run one operate_* tool
+    POST   /v1/sandboxes/{id}/element-at     the element under a viewport point (viewer pointing)
     DELETE /v1/sandboxes/{id}                stop it
 
 Capacity is explicit: when `max_sandboxes` are running the API answers 503, so the orchestrator
@@ -38,6 +39,18 @@ class StartIn(BaseModel):
     locale: str = "en-US"
     width: int = Field(default=1280, ge=640, le=1920)
     height: int = Field(default=720, ge=480, le=1080)
+    # False when the player draws the cursor and highlights itself from overlay events.
+    draw_overlays: bool = True
+
+
+class PointIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    x: float = Field(ge=0, le=1920)
+    y: float = Field(ge=0, le=1080)
+
+
+class PointOut(BaseModel):
+    element: dict[str, Any] | None
 
 
 class StartOut(BaseModel):
@@ -128,6 +141,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 width=body.width,
                 height=body.height,
                 locale=body.locale,
+                draw_overlays=body.draw_overlays,
             )
             try:
                 sandbox = await Sandbox.launch(
@@ -140,18 +154,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 raise HTTPException(422, str(e)) from e
             streamer = None
             if body.livekit_room:
-                streamer = ScreenStreamer(sandbox.page, body.width, body.height)
+                streamer = ScreenStreamer(sandbox.page, body.width, body.height, body.session_id)
                 token = sandbox_token(
                     settings.livekit_api_key,
                     settings.livekit_api_secret.get_secret_value(),
                     room=body.livekit_room,
                     session_id=body.session_id,
+                    width=body.width,
+                    height=body.height,
                 )
                 try:
                     await streamer.start(settings.livekit_url, token)
                 except Exception:
                     await sandbox.close()
                     raise
+                sandbox.on_overlay = streamer.publish_overlay
             sid = f"sbx_{uuid.uuid4().hex[:16]}"
             sandboxes[sid] = _Entry(sandbox, streamer)
         finally:
@@ -170,6 +187,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if entry is None:
             raise HTTPException(404, "sandbox not found")
         return await entry.sandbox.execute(tool, body.input, confirmed=body.confirmed)
+
+    @app.post("/v1/sandboxes/{sandbox_id}/element-at", response_model=PointOut)
+    async def element_at(sandbox_id: str, body: PointIn, _: Auth) -> PointOut:
+        """The element under a point on the shared screen (viewport CSS pixels)."""
+        entry = sandboxes.get(sandbox_id)
+        if entry is None:
+            raise HTTPException(404, "sandbox not found")
+        el = await entry.sandbox.element_at(body.x, body.y)
+        return PointOut(element=el.as_dict() if el else None)
 
     @app.delete("/v1/sandboxes/{sandbox_id}", status_code=204)
     async def stop(sandbox_id: str, _: Auth) -> None:
