@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+/* Design tokens. --accent comes from the launch config's branding when set (see layout). */
+:root {
+  --accent: #0f7f82;
+  --on-accent: #ffffff;
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --surface-2: #eef1f4;
+  --text: #121820;
+  --muted: #5b6673;
+  --stage: #11161c;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c1014;
+    --surface: #151b22;
+    --surface-2: #1e2630;
+    --text: #e8edf2;
+    --muted: #9aa6b2;
+    --stage: #000000;
+    color-scheme: dark;
+  }
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .ud-btn-primary,
+  .ud-btn-secondary,
+  .ud-btn-danger {
+    @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .ud-btn-primary {
+    @apply bg-[var(--accent)] text-[var(--on-accent)] hover:brightness-110;
+  }
+  .ud-btn-secondary {
+    @apply bg-[var(--surface-2)] text-[var(--text)] hover:brightness-95;
+  }
+  .ud-btn-danger {
+    @apply bg-red-600 text-white hover:bg-red-700;
+  }
+  .ud-input {
+    @apply w-full rounded-lg border border-black/10 bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/30 disabled:opacity-60;
+  }
+  .ud-rating {
+    @apply grid size-10 cursor-pointer place-items-center rounded-lg bg-[var(--surface-2)] text-sm font-semibold has-[:checked]:bg-[var(--accent)] has-[:checked]:text-[var(--on-accent)] has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--accent)];
+  }
+}
+
+/* Client-drawn overlays (ADR 4). */
+.ud-cursor {
+  transition:
+    left 280ms cubic-bezier(0.2, 0.7, 0.2, 1),
+    top 280ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  z-index: 3;
+}
+.ud-highlight {
+  box-shadow: 0 0 0 9999px rgb(15 23 35 / 0.18);
+  animation: ud-fade-in 160ms ease-out;
+  z-index: 2;
+}
+.ud-ripple {
+  width: 36px;
+  height: 36px;
+  left: -18px;
+  top: -18px;
+  animation: ud-ripple 600ms ease-out forwards;
+}
+@keyframes ud-ripple {
+  from {
+    transform: scale(0.3);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+@keyframes ud-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ud-cursor {
+    transition: none;
+  }
+  .ud-highlight,
+  .ud-ripple {
+    animation: none;
+  }
+}

@@ -1,0 +1,65 @@
+// UI copy for the player, in one place so it can move to next-intl message files (docs/02 §4.1)
+// without touching components.
+
+export const t = {
+  start: "Start the live demo",
+  starting: "Connecting…",
+  disclosure: (agent: string) =>
+    `You'll talk with ${agent}, an AI agent, who will show you the product on a shared screen. The call is transcribed so the team can follow up.`,
+  micHint: "Your browser will ask for the microphone. You can also type.",
+  waitingAgent: (agent: string) => `${agent} is joining…`,
+  waitingScreen: "Opening the product…",
+  agentTimeout: "The demo agent couldn't join. Please try again in a moment.",
+  startFailed: "We couldn't start the demo.",
+  tryAgain: "Try again",
+  reconnecting: "Reconnecting…",
+  mute: "Mute microphone",
+  unmute: "Unmute microphone",
+  micBlocked: "Microphone unavailable. Type your questions below.",
+  enableAudio: "Turn on sound",
+  end: "End demo",
+  chatPlaceholder: "Type a question…",
+  send: "Send",
+  transcript: "Transcript",
+  point: "Point at the screen",
+  pointing: "Click anything on the screen to ask about it",
+  pointedAt: (what: string) => `You pointed at ${what}`,
+  pointedNothing: "Nothing to point at there",
+  confirmTitle: "Allow this action?",
+  confirmBody: "The agent wants to do this in the product:",
+  approve: "Allow",
+  decline: "Don't allow",
+  handoff: "The team has been notified and will follow up.",
+  endedTitle: "Thanks for joining",
+  endedBody: "The team has a transcript of this call and will follow up.",
+  feedbackQuestion: "How useful was this demo?",
+  feedbackComment: "Anything we should know? (optional)",
+  feedbackSend: "Send feedback",
+  feedbackThanks: "Thanks for the feedback.",
+  restart: "Start a new demo",
+  notLive: "This demo isn't available.",
+  state: {
+    idle: "Ready",
+    listening: "Listening",
+    thinking: "Thinking",
+    speaking: "Speaking",
+    acting: "Working in the product",
+    handoff: "Handing over",
+    ended: "Ended",
+  },
+  tool: {
+    operate_observe: "Looking at the screen",
+    operate_navigate: "Opening a page",
+    operate_click: "Clicking",
+    operate_type: "Typing",
+    operate_select: "Choosing an option",
+    operate_press: "Pressing a key",
+    operate_scroll: "Scrolling",
+    operate_hover: "Pointing",
+    operate_highlight: "Highlighting",
+  } as Record<string, string>,
+} as const;
+
+export function describeTool(tool: string): string {
+  return t.tool[tool] ?? "Working";
+}
