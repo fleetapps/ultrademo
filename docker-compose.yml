@@ -1,5 +1,6 @@
 # Local stack: a whole demo, from the player page to the product sandbox.
-#   cp .env.example .env   # add ANTHROPIC_API_KEY, DEEPGRAM_API_KEY, ELEVEN_API_KEY
+#   cp .env.example .env   # add ANTHROPIC_API_KEY, ELEVEN_API_KEY, and DEEPGRAM_API_KEY or
+#                          # ULTRADEMO_AGENT_STT_PROVIDER=elevenlabs
 #   docker compose up --build
 #   docker compose exec api python -m ultrademo_api.bootstrap examples/acme.json
 #   open http://localhost:3000/d/acme-crm-demo
@@ -24,6 +25,10 @@ services:
   livekit:
     image: livekit/livekit-server:v1.13.7
     command: ["--dev", "--bind", "0.0.0.0"]
+    # The address LiveKit gives browsers and the other containers for media. Empty means it picks
+    # one itself, which on Docker Desktop (Mac, Windows) is the container's own and unreachable.
+    environment:
+      NODE_IP: ${LIVEKIT_NODE_IP:-}
     ports: ["7880:7880", "7881:7881", "7882:7882/udp"]
 
   api:
@@ -62,7 +67,8 @@ services:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set it in .env}
-      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:?set it in .env}
+      ULTRADEMO_AGENT_STT_PROVIDER: ${ULTRADEMO_AGENT_STT_PROVIDER:-deepgram}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
       ELEVEN_API_KEY: ${ELEVEN_API_KEY:?set it in .env}
     depends_on: [api, operator, livekit]
 
