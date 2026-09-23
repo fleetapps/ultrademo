@@ -36,9 +36,34 @@ def test_operator_http_api(site_url):
         assert r.status_code == 200 and "Search deals" in r.json()["snapshot"]
         assert c.get("/healthz").json() == {"status": "ok", "sandboxes": 1, "capacity": 1}
 
+        r = c.post(f"/v1/sandboxes/{sid}/element-at", json={"x": 1, "y": 1}, headers=AUTH)
+        assert r.status_code == 200 and "element" in r.json()
+        r = c.post(f"/v1/sandboxes/{sid}/element-at", json={"x": -1, "y": 1}, headers=AUTH)
+        assert r.status_code == 422
+        r = c.post("/v1/sandboxes/nope/element-at", json={"x": 1, "y": 1}, headers=AUTH)
+        assert r.status_code == 404
+
         assert c.delete(f"/v1/sandboxes/{sid}", headers=AUTH).status_code == 204
         bad = c.post(
             "/v1/sandboxes", json={**body, "start_url": "https://evil.example"}, headers=AUTH
         )
         assert bad.status_code == 422
         assert c.get("/healthz").json()["sandboxes"] == 0
+
+
+def test_sandbox_token_advertises_the_viewport():
+    import json
+
+    import jwt
+    from ultrademo_operator.streamer import sandbox_token
+
+    claims = jwt.decode(
+        sandbox_token("k", "s" * 32, room="r1", session_id="s1", width=1440, height=900),
+        options={"verify_signature": False},
+    )
+    assert claims["sub"] == "sandbox_s1"
+    assert claims["video"]["canPublishSources"] == ["screen_share"]
+    assert claims["video"]["canPublishData"] is True
+    assert json.loads(claims["attributes"]["ultrademo.screen_meta"]) == {
+        "viewport": {"w": 1440, "h": 900}
+    }

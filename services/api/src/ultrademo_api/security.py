@@ -5,6 +5,7 @@ deliberately slow, so a verified key is cached in-process for a short TTL keyed 
 full key. Revocation therefore takes effect within `api_key_cache_ttl_s`.
 """
 
+import base64
 import hashlib
 import hmac
 import secrets
@@ -83,3 +84,13 @@ class KeyCache:
 
 def constant_time_equals(a: str, b: str) -> bool:
     return hmac.compare_digest(a.encode(), b.encode())
+
+
+def session_receipt(secret: str, session_id: UUID) -> str:
+    """A bearer credential scoped to one session, handed to the viewer who started it.
+
+    It is an HMAC of the session id, so it needs no storage and cannot be forged for another
+    session. Expiry is enforced by the caller against the session's creation time.
+    """
+    mac = hmac.new(secret.encode(), f"session-receipt:{session_id}".encode(), hashlib.sha256)
+    return base64.urlsafe_b64encode(mac.digest()).rstrip(b"=").decode()

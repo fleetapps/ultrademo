@@ -4,38 +4,55 @@ Frames come from Chrome's own screencast (CDP `Page.startScreencast`), which onl
 page repaints, so a static screen costs almost nothing. They are published through
 `rtc.VideoSource(w, h, is_screencast=True)`, which tells WebRTC to keep text sharp under congestion
 by dropping frames instead of resolution (docs/06 §2 "Media").
+
+The same participant publishes overlay events (cursor, highlights) on the events topic, so the
+player can draw them over the video in sync with the action (ADR 4), and advertises the viewport
+size in the `ultrademo.screen_meta` attribute, which is the coordinate space of those events.
 """
 
 import asyncio
 import base64
 import io
+import json
 import time
 from datetime import timedelta
+from typing import Any
 
 import structlog
 from livekit import api, rtc
 from PIL import Image
 from playwright.async_api import CDPSession, Page
+from ultrademo_protocol import ATTR_KIND, ATTR_SCREEN_META, TOPIC_EVENTS, Envelope, EventType
 
 log = structlog.get_logger()
 
 MAX_FPS = 15
 
 
-def sandbox_token(api_key: str, api_secret: str, *, room: str, session_id: str) -> str:
+def sandbox_token(
+    api_key: str,
+    api_secret: str,
+    *,
+    room: str,
+    session_id: str,
+    width: int = 1280,
+    height: int = 720,
+) -> str:
     grants = api.VideoGrants(
         room_join=True,
         room=room,
         can_publish=True,
         can_publish_sources=["screen_share"],
         can_subscribe=False,
-        can_publish_data=False,
+        can_publish_data=True,  # overlay events
+        can_update_own_metadata=False,
     )
+    meta = json.dumps({"viewport": {"w": width, "h": height}}, separators=(",", ":"))
     return (
         api.AccessToken(api_key, api_secret)
         .with_identity(f"sandbox_{session_id}")
         .with_name("Product screen")
-        .with_attributes({"ultrademo.kind": "sandbox"})
+        .with_attributes({ATTR_KIND: "sandbox", ATTR_SCREEN_META: meta})
         .with_grants(grants)
         .with_ttl(timedelta(hours=2))
         .to_jwt()
@@ -43,8 +60,10 @@ def sandbox_token(api_key: str, api_secret: str, *, room: str, session_id: str) 
 
 
 class ScreenStreamer:
-    def __init__(self, page: Page, width: int, height: int) -> None:
+    def __init__(self, page: Page, width: int, height: int, session_id: str = "") -> None:
         self._page = page
+        self._session_id = session_id
+        self._seq = 0
         self._w = width
         self._h = height
         self._room = rtc.Room()
@@ -70,6 +89,14 @@ class ScreenStreamer:
             {"format": "jpeg", "quality": 80, "maxWidth": self._w, "maxHeight": self._h},
         )
         self._keepalive = asyncio.create_task(self._resend_last())
+
+    async def publish_overlay(self, type_: EventType, payload: dict[str, Any]) -> None:
+        """Send one overlay event to the room (reliable, so a highlight is never lost)."""
+        self._seq += 1
+        env = Envelope(type=type_, seq=self._seq, session_id=self._session_id, **payload)
+        await self._room.local_participant.publish_data(
+            env.encode(), reliable=True, topic=TOPIC_EVENTS
+        )
 
     def _on_frame(self, params: dict) -> None:
         task = asyncio.create_task(self._handle(params))

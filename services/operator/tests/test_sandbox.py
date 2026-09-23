@@ -42,6 +42,19 @@ def test_parse_elements():
     assert els["e6"].role == "textbox" and els["e6"].box is None
 
 
+def test_parse_elements_marks_iframe_contents():
+    # After a navigation the main frame's refs carry a prefix too, so only nesting tells.
+    els = parse_elements(
+        "- main [ref=f2e1] [box=0,0,800,600]:\n"
+        "  - iframe [ref=f2e2] [box=10,10,300,200]:\n"
+        '    - button "Pay" [ref=f3e1] [box=5,5,40,20]\n'
+        '  - link "Deals" [ref=f2e3] [box=8,8,36,17]\n'
+    )
+    assert not els["f2e1"].in_frame and not els["f2e2"].in_frame
+    assert els["f3e1"].in_frame
+    assert not els["f2e3"].in_frame
+
+
 def test_policy_classes():
     p = Policy.from_agent({"allowed": [r"^save deal$"], "blocked": [r"\bforecast\b"]})
     assert p.classify("operate_click", "button", "Delete deal") == PolicyClass.CONFIRM
@@ -127,3 +140,47 @@ async def test_screenshot_and_highlight(sandbox):
     )
     assert r.status == "ok"
     assert await sandbox.page.evaluate("typeof window.__ultrademo.highlight") == "function"
+
+
+async def test_overlay_events_and_pointing(sandbox):
+    events: list[tuple[str, dict]] = []
+
+    async def sink(type_, payload):
+        events.append((type_.value, payload))
+
+    sandbox.on_overlay = sink
+    obs = await sandbox.execute("operate_observe", {})
+    link = ref_for(obs.snapshot, "link", "Deals")
+    await sandbox.execute("operate_highlight", {"ref": link, "label": "Your pipeline"})
+    r = await sandbox.execute("operate_click", {"ref": link})
+    assert r.status == "ok"
+
+    kinds = [(t, p.get("kind")) for t, p in events]
+    assert kinds == [
+        ("overlay.highlight", None),
+        ("overlay.cursor", "move"),
+        ("overlay.cursor", "click"),
+    ]
+    hl = events[0][1]
+    assert hl["label"] == "Your pipeline" and hl["ttl_ms"] == 4000
+    assert (hl["screen_w"], hl["screen_h"]) == (1280, 720)
+    bbox = hl["bbox"]
+    # The cursor lands in the middle of the highlighted element, in the same coordinate space.
+    cur = events[1][1]
+    assert bbox["x"] <= cur["x"] <= bbox["x"] + bbox["w"]
+    assert bbox["y"] <= cur["y"] <= bbox["y"] + bbox["h"]
+
+    # Pointing at that spot returns the element the model would address, with a usable ref.
+    el = await sandbox.element_at(cur["x"], cur["y"])
+    assert el is not None and el.role == "link" and el.name == "Deals"
+    again = await sandbox.execute("operate_click", {"ref": el.ref})
+    assert again.status == "ok"
+    assert await sandbox.element_at(-50, -50) is None
+
+    # A failing sink never breaks the action.
+    async def broken(type_, payload):
+        raise RuntimeError("room gone")
+
+    sandbox.on_overlay = broken
+    r = await sandbox.execute("operate_navigate", {"url": "/index.html"})
+    assert r.status == "ok"

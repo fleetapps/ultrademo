@@ -76,6 +76,8 @@ def session_system(ctx: dict[str, Any]) -> str:
         parts.append("Account context: " + _json(context))
     if params := ctx.get("params"):
         parts.append("Launch parameters: " + _json(params))
+    if form := ctx.get("form"):
+        parts.append("The viewer's pre-call form answers (typed by the viewer): " + _json(form))
     ctas = (ctx.get("launch_config") or {}).get("ctas") or []
     if ctas:
         labels = ", ".join(f'{c.get("kind")}: "{c.get("label")}"' for c in ctas)

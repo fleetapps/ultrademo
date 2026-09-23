@@ -65,7 +65,8 @@ async def bootstrap(dsn: str, spec: dict[str, Any]) -> dict[str, str]:
             lc = spec["launch_config"]
             await conn.execute(
                 "INSERT INTO launch_configs (org_id, slug, name, description, status, agent_version_id,"
-                " ctas, embed_origins) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                " ctas, embed_origins, form_schema, branding)"
+                " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
                 org_id,
                 lc["slug"],
                 lc["name"],
@@ -74,6 +75,8 @@ async def bootstrap(dsn: str, spec: dict[str, Any]) -> dict[str, str]:
                 av_id,
                 lc.get("ctas", []),
                 lc.get("embed_origins", []),
+                lc.get("form_schema"),
+                lc.get("branding", {}),
             )
             key = generate_api_key()
             await conn.execute(

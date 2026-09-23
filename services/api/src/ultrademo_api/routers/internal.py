@@ -34,6 +34,7 @@ class SessionContext(BaseModel):
     product: dict[str, Any]
     launch_config: dict[str, Any]
     params: dict[str, Any]
+    form: dict[str, Any] | None
     context_link: dict[str, Any] | None
 
 
@@ -45,7 +46,7 @@ async def get_context(
 ) -> SessionContext:
     async with db.tenant(org_id) as conn:
         r = await conn.fetchrow(
-            "SELECT s.id, s.type, s.locale, s.livekit_room, s.params,"
+            "SELECT s.id, s.type, s.locale, s.livekit_room, s.params, s.form,"
             " lc.slug, lc.name AS lc_name, lc.ctas, lc.max_duration_s,"
             " av.id AS av_id, av.version, av.system_prompt, av.voice, av.policy, av.model,"
             " p.name AS product_name, p.base_url, p.allowed_domains,"
@@ -86,6 +87,7 @@ async def get_context(
         },
         launch_config={"slug": r["slug"], "name": r["lc_name"], "ctas": r["ctas"]},
         params=r["params"],
+        form=r["form"],
         context_link=link,
     )
 

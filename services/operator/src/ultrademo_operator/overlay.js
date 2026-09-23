@@ -1,5 +1,6 @@
-// Injected into every page of the sandbox (context.add_init_script) so the streamed video shows a
-// cursor and highlights even before the player draws its own client-side overlays (ADR 4). Lives in
+// Injected into every page of the sandbox (context.add_init_script) only when a sandbox starts with
+// draw_overlays=true, so the video itself shows the cursor and highlights. The player draws them
+// client-side from overlay events instead (ADR 15 §1), so the session agent turns this off. Lives in
 // a closed shadow root with pointer-events:none so it cannot affect the product's layout or clicks.
 (() => {
   if (window.top !== window || window.__ultrademo) return;
