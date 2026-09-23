@@ -1,0 +1,31 @@
+{
+  "organization": {"slug": "e2e", "name": "E2E", "region": "us"},
+  "product": {
+    "name": "Acme CRM (sample)",
+    "base_url": "http://localhost:8080/index.html",
+    "allowed_domains": ["localhost"]
+  },
+  "agent": {
+    "name": "Ava",
+    "system_prompt": "Scripted by e2e/scripted_agent.py; no model runs in the end-to-end test.",
+    "policy": {"blocked": ["\\bbilling\\b"]}
+  },
+  "launch_config": {
+    "slug": "e2e-demo",
+    "name": "Acme CRM live demo",
+    "description": "Talk to Ava and see Acme CRM in action.",
+    "status": "published",
+    "ctas": [
+      {"kind": "book", "label": "Book a call", "url": "https://cal.example/acme"},
+      {"kind": "link", "label": "Read the docs", "url": "https://docs.example/acme"}
+    ],
+    "form_schema": {
+      "fields": [
+        {"name": "email", "label": "Work email", "type": "email", "required": true},
+        {"name": "team", "label": "Team size", "type": "select", "options": ["1-10", "11-50", "51+"]}
+      ]
+    },
+    "branding": {"accent": "#6b3fd4"},
+    "embed_origins": ["http://localhost:3999"]
+  }
+}
