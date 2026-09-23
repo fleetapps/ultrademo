@@ -65,11 +65,14 @@ pnpm run build && pnpm run e2e
 ## Run a live demo locally
 
 ```bash
-cp .env.example .env          # add ANTHROPIC_API_KEY, DEEPGRAM_API_KEY, ELEVEN_API_KEY
+cp .env.example .env          # add ANTHROPIC_API_KEY, ELEVEN_API_KEY and DEEPGRAM_API_KEY
 docker compose up --build
 docker compose exec api python -m ultrademo_api.bootstrap examples/acme.json   # prints an API key once
 open http://localhost:3000/d/acme-crm-demo
 ```
+
+- Without a Deepgram key, set `ULTRADEMO_AGENT_STT_PROVIDER=elevenlabs` in `.env`. Speech to text then uses ElevenLabs Scribe v2 Realtime with the same `ELEVEN_API_KEY`.
+- On Docker Desktop (Mac, Windows), set `LIVEKIT_NODE_IP` to your computer's local IP (`ipconfig getifaddr en0` on a Mac). Otherwise the call joins with no screen and no sound.
 
 To embed the demo on another site, add its origin to the launch config's `embed_origins` and frame `/d/acme-crm-demo/embed`. The page posts `ready`, `session.started`, `cta.clicked`, `handoff.requested` and `session.ended` to the host.
 

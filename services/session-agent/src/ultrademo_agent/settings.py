@@ -29,7 +29,11 @@ class Settings(BaseSettings):
     clear_tool_results_at_tokens: int = 60_000
 
     # Voice. Deepgram Nova-3 multilingual STT and ElevenLabs Flash v2.5 TTS (docs/05 §1).
+    # `elevenlabs` switches speech to text to ElevenLabs Scribe, which needs no Deepgram key.
+    stt_provider: Literal["deepgram", "elevenlabs"] = "deepgram"
     stt_model: str = "nova-3"
+    # Only `scribe_v2_realtime` streams; the other Scribe models transcribe after each turn.
+    elevenlabs_stt_model: str = "scribe_v2_realtime"
     tts_model: str = "eleven_flash_v2_5"
     tts_voice_id: str = "EXAVITQu4vr4xnSDxMaL"
 

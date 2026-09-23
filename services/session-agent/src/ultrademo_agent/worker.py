@@ -8,9 +8,9 @@ above discovers the `server` global. For local development with reload, use `lk 
 
 The job is dispatched explicitly by agent name from the viewer's token (see the api's
 livekit_tokens.py). It fetches the session context, starts a sandbox that streams the product into
-the room, and runs a cascaded voice pipeline (Silero VAD + LiveKit turn detector, Deepgram STT,
-ElevenLabs TTS) whose LLM step is replaced by our Claude brain via the documented `llm_node`
-override (https://docs.livekit.io/agents/build/nodes/).
+the room, and runs a cascaded voice pipeline (Silero VAD + LiveKit turn detector, Deepgram or
+ElevenLabs STT, ElevenLabs TTS) whose LLM step is replaced by our Claude brain via the documented
+`llm_node` override (https://docs.livekit.io/agents/build/nodes/).
 """
 
 import asyncio
@@ -31,8 +31,9 @@ from livekit.agents import (
     inference,
     llm,
     room_io,
+    stt,
 )
-from livekit.agents.types import FlushSentinel
+from livekit.agents.types import NOT_GIVEN, FlushSentinel
 from livekit.plugins import deepgram, elevenlabs, silero
 from ultrademo_protocol import (
     ATTR_AGENT_STATE,
@@ -52,6 +53,20 @@ from ultrademo_agent.prompt import session_system, static_system
 from ultrademo_agent.settings import Settings, get_settings
 
 log = structlog.get_logger()
+
+
+def build_stt(settings: Settings, voice: dict[str, Any]) -> stt.STT:
+    """The viewer's speech to text, from ULTRADEMO_AGENT_STT_PROVIDER."""
+    language = voice.get("stt_language", "multi")
+    if settings.stt_provider == "elevenlabs":
+        # "multi" is Deepgram's code-switching mode. Scribe detects the language by itself when
+        # none is given, so only a real language code is passed on.
+        return elevenlabs.STT(
+            model=settings.elevenlabs_stt_model,
+            language_code=NOT_GIVEN if language == "multi" else language,
+        )
+    return deepgram.STT(model=settings.stt_model, language=language)
+
 
 _background: set[asyncio.Task] = set()
 
@@ -281,7 +296,7 @@ async def entrypoint(ctx: JobContext) -> None:
     voice = sc["agent_version"].get("voice") or {}
     session = AgentSession(
         vad=silero.VAD.load(),
-        stt=deepgram.STT(model=settings.stt_model, language=voice.get("stt_language", "multi")),
+        stt=build_stt(settings, voice),
         tts=elevenlabs.TTS(
             model=voice.get("model", settings.tts_model),
             voice_id=voice.get("voice_id", settings.tts_voice_id),
