@@ -1,4 +1,5 @@
 # Render Blueprint: the docker-compose stack as Render services (docs/render.md).
+# Frankfurt, next to the workspace's other services.
 #   Render dashboard > New > Blueprint > pick this repo. It asks for every `sync: false` value.
 #
 # LiveKit is not deployed here: Render has no inbound UDP, which WebRTC media needs. Use LiveKit
@@ -12,6 +13,7 @@ databases:
   - name: ultrademo-db
     databaseName: ultrademo
     plan: basic-256mb
+    region: frankfurt
     postgresMajorVersion: "18"
 
 services:
@@ -19,6 +21,7 @@ services:
   - type: web
     name: ultrademo-web
     runtime: docker
+    region: frankfurt
     plan: starter
     dockerfilePath: ./infra/docker/web.Dockerfile
     dockerContext: ./apps/web
@@ -35,6 +38,7 @@ services:
   - type: pserv
     name: ultrademo-api
     runtime: docker
+    region: frankfurt
     plan: starter
     dockerfilePath: ./infra/docker/python-service.Dockerfile
     dockerContext: .
@@ -66,6 +70,7 @@ services:
   - type: pserv
     name: ultrademo-operator
     runtime: docker
+    region: frankfurt
     plan: standard
     dockerfilePath: ./infra/docker/operator.Dockerfile
     dockerContext: .
@@ -87,6 +92,7 @@ services:
   - type: worker
     name: ultrademo-agent
     runtime: docker
+    region: frankfurt
     plan: standard
     dockerfilePath: ./infra/docker/agent.Dockerfile
     dockerContext: .
