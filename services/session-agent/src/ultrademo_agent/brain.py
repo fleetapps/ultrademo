@@ -28,7 +28,7 @@ from ultrademo_protocol import ToolResult, claude_tool_definitions, parse_tool_i
 from ultrademo_protocol.tools import OPERATOR_TOOLS, ToolInputError
 
 from ultrademo_agent.pricing import Usage
-from ultrademo_agent.prompt import KICKOFF
+from ultrademo_agent.prompt import KICKOFF, ROUND_LIMIT_LINE
 
 log = structlog.get_logger()
 
@@ -185,12 +185,20 @@ class Brain:
         self._notes = [*self._notes[-2:], text]
 
     async def respond(self, user_text: str | None) -> AsyncIterator[str | _Flush]:
-        """Handle one viewer turn (or the join, when `user_text` is None)."""
-        content = user_text or KICKOFF
-        if self._notes:
-            content = "\n".join([*self._notes, content])
-            self._notes.clear()
-        self.messages.append({"role": "user", "content": content})
+        """Handle one viewer turn.
+
+        Without viewer text, the first turn is the join (the greeting) and a later one is started
+        by the platform, from the queued notes alone (a quiet viewer, the time running out).
+        """
+        parts = [*self._notes]
+        self._notes.clear()
+        if user_text:
+            parts.append(user_text)
+        elif not self.messages:
+            parts.append(KICKOFF)
+        if not parts:
+            return  # nothing new to respond to
+        self.messages.append({"role": "user", "content": "\n".join(parts)})
         for _ in range(self.config.max_tool_rounds):
             spoken: list[str] = []
             try:
@@ -250,7 +258,11 @@ class Brain:
             self._append_results(calls)
             if self.ended:
                 return
+        # Out of rounds: the last message is tool results, and the viewer has heard nothing since
+        # the preamble. Say something and close the turn, so the next one starts cleanly.
         log.warning("tool_round_limit", rounds=self.config.max_tool_rounds)
+        self.messages.append({"role": "assistant", "content": ROUND_LIMIT_LINE})
+        yield " " + ROUND_LIMIT_LINE
 
     def _append_results(self, calls: list[_ToolCall]) -> None:
         self.messages.append(

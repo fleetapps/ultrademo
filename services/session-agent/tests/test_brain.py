@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 from ultrademo_agent.brain import BETA_CONTEXT_EDITING, BETA_FALLBACK, FLUSH, INTERRUPTED, Brain
-from ultrademo_agent.prompt import session_system, static_system
+from ultrademo_agent.prompt import KICKOFF, ROUND_LIMIT_LINE, session_system, static_system
 from ultrademo_protocol import TOOL_NAME_RE, ToolResult, claude_tool_definitions
 
 
@@ -328,3 +328,28 @@ async def test_notes_ride_along_with_the_next_turn():
     assert first == {"role": "user", "content": "[note 1]\n[note 2]\n[note 3]\nWhat is this?"}
     await collect(b.respond("And this?"))
     assert client.calls[1]["messages"][-1]["content"] == "And this?"
+
+
+async def test_platform_started_turns_carry_only_the_notes():
+    client = FakeClient(
+        [message([text("Hi.")], "end_turn"), message([text("Still there?")], "end_turn")]
+    )
+    b = brain(client)
+    await collect(b.respond(None))
+    assert client.calls[0]["messages"][-1]["content"] == KICKOFF
+    b.note("[quiet]")
+    await collect(b.respond(None))  # not a second greeting
+    assert client.calls[1]["messages"][-1] == {"role": "user", "content": "[quiet]"}
+    assert await collect(b.respond(None)) == [] and len(client.calls) == 2  # nothing new
+
+
+async def test_tool_round_limit_still_answers_and_leaves_history_valid():
+    look = message([tool("t1", "operate_observe", {})], "tool_use")
+    client = FakeClient([look, look])
+    op = FakeOperator({"operate_observe": [ToolResult(status="ok", summary="seen")] * 2})
+    b = brain(client, op)
+    b.config.max_tool_rounds = 2
+    out = await collect(b.respond("show everything"))
+    assert ROUND_LIMIT_LINE in "".join(o for o in out if isinstance(o, str))
+    assert b.messages[-1] == {"role": "assistant", "content": ROUND_LIMIT_LINE}
+    assert [m["role"] for m in b.messages[-2:]] == ["user", "assistant"]

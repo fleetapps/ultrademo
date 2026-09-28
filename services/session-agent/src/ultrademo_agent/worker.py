@@ -49,6 +49,7 @@ from ultrademo_protocol.envelope import EventType
 
 from ultrademo_agent.brain import FLUSH, Brain, BrainConfig
 from ultrademo_agent.clients import ApiClient, OperatorClient
+from ultrademo_agent.pacing import Pacing
 from ultrademo_agent.pointer import Pointer
 from ultrademo_agent.prompt import session_system, static_system
 from ultrademo_agent.settings import Settings, get_settings
@@ -319,6 +320,8 @@ async def entrypoint(ctx: JobContext) -> None:
             # Preemptive generation would start a second (billed) Claude request per turn.
             preemptive_generation={"enabled": False},
         ),
+        # Marks the viewer "away" after this much silence on both sides; Pacing checks in then.
+        user_away_timeout=settings.quiet_nudge_after_s or None,
     )
 
     @session.on("conversation_item_added")
@@ -381,11 +384,25 @@ async def entrypoint(ctx: JobContext) -> None:
     async def _on_pointer(data: rtc.RpcInvocationData) -> str:
         return await pointer.handle(data.caller_identity, data.payload)
 
+    pacing = Pacing(
+        brain,
+        # llm_node sees no new viewer message, so the brain answers the queued notes.
+        start_turn=lambda: session.generate_reply(),
+        agent_idle=lambda: session.agent_state == "listening",
+        max_duration_s=sc["max_duration_s"],
+        wrap_up_before_s=settings.wrap_up_before_s,
+    )
+
+    @session.on("user_state_changed")
+    def _on_user_state(ev: Any) -> None:
+        pacing.user_state_changed(ev.new_state)
+
     await api.started()
     end_reason = "viewer_left"
     session.generate_reply()  # llm_node sees no new viewer message and greets
 
     ticker = asyncio.create_task(cost_ticker())
+    pacer = asyncio.create_task(pacing.wrap_up_timer())
     try:
         ended = asyncio.create_task(hooks.end_requested.wait())
         left = asyncio.create_task(closed.wait())
@@ -407,6 +424,7 @@ async def entrypoint(ctx: JobContext) -> None:
             await handle.wait_for_playout()
     finally:
         ticker.cancel()
+        pacer.cancel()
         await hooks.publish(EventType.SESSION_STATUS, status="ended", reason=end_reason)
         await hooks.state(AgentState.ENDED)
         ctx.shutdown(reason=end_reason)

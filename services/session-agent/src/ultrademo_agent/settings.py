@@ -45,6 +45,12 @@ class Settings(BaseSettings):
 
     confirm_timeout_s: float = 20.0
 
+    # Demo pacing. The agent is told to wrap up this long before the session limit (skipped for
+    # sessions shorter than twice this), and checks in once when the viewer has been silent this
+    # long. 0 turns either off.
+    wrap_up_before_s: float = 120.0
+    quiet_nudge_after_s: float = 20.0
+
 
 @lru_cache
 def get_settings() -> Settings:
