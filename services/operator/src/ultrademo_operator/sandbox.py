@@ -22,7 +22,15 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import structlog
-from playwright.async_api import Browser, BrowserContext, Locator, Page, Playwright, Route
+from playwright.async_api import (
+    Browser,
+    BrowserContext,
+    Locator,
+    Page,
+    Playwright,
+    Request,
+    Route,
+)
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 from ultrademo_protocol import EventType, PolicyClass, ToolResult, parse_tool_input
@@ -49,6 +57,38 @@ _LINE_RE = re.compile(
 )
 
 MAX_SNAPSHOT_CHARS = 16_000
+
+# After an action, the page counts as settled once its DOM and the data requests the action started
+# have both been still this long. A few frames covers a re-render; a fetch the action started keeps
+# it waiting until the response has been rendered.
+SETTLE_QUIET_MS = 100
+# Typing without submitting: search-as-you-type fields commonly debounce 300 ms before they fetch.
+SETTLE_TYPING_QUIET_MS = 400
+# Upper bound for pages that never go quiet (live polling, tickers, animated DOM).
+SETTLE_MAX_MS = 1_500
+_SETTLE_POLL_S = 0.05
+_DATA_REQUESTS = {"fetch", "xhr"}
+_REQUEST_FORGET_S = 60
+
+# Records when the document last changed, from the first moment it exists. Mutations inside the
+# overlay's closed shadow root never reach a document observer, and its host is skipped.
+_MUTATION_CLOCK_JS = """(() => {
+  const mark = (records) => {
+    const overlay = (n) => n.nodeName === "ULTRADEMO-OVERLAY";
+    const own = (r) => overlay(r.target) ||
+      (r.type === "childList" && r.addedNodes.length > 0 && [...r.addedNodes].every(overlay));
+    if (records && records.every(own)) return;
+    window.__ultrademoLastMutation = performance.now();
+  };
+  mark();
+  new MutationObserver(mark).observe(document, {
+    subtree: true, childList: true, attributes: true, characterData: true,
+  });
+})();"""
+_SINCE_MUTATION_JS = (
+    "() => window.__ultrademoLastMutation === undefined ? 1e9"
+    " : performance.now() - window.__ultrademoLastMutation"
+)
 
 
 @dataclass
@@ -114,6 +154,30 @@ def parse_elements(snapshot: str) -> dict[str, ElementInfo]:
     return out
 
 
+def action_requests(
+    spans: list[list[float | None]], acted: float, settle_from: float, quiet: float
+) -> list[list[float | None]]:
+    """The requests an action caused, out of all the page's recent ones.
+
+    A request is the action's if it starts after the action began and before the page could have
+    been called quiet: within `quiet` of the action finishing, of one of its requests answering,
+    or while one of them is still in flight (a fetch chained on another). Background polling
+    that happens to fire later is someone else's, so a page that polls still settles.
+    """
+    ours: list[list[float | None]] = []
+    reach = settle_from + quiet
+    for span in sorted(spans, key=lambda sp: sp[0]):  # type: ignore[arg-type,return-value]
+        start, end = span
+        assert start is not None
+        if start < acted:
+            continue
+        if start > reach:
+            break
+        ours.append(span)
+        reach = float("inf") if end is None else max(reach, end + quiet)
+    return ours
+
+
 class Sandbox:
     def __init__(self, config: SandboxConfig, browser: Browser, owns_browser: bool) -> None:
         self.config = config
@@ -129,6 +193,9 @@ class Sandbox:
         self.on_overlay: OverlaySink | None = None
         self._url_before = ""
         self._highlight_seq = 0
+        # Recent data requests: when each started, and when it answered (None while in flight).
+        self._requests: dict[Request, list[float | None]] = {}
+        self._action_started = 0.0
 
     @classmethod
     async def launch(
@@ -160,10 +227,14 @@ class Sandbox:
             accept_downloads=False,
         )
         self._context.set_default_timeout(c.action_timeout_ms)
+        await self._context.add_init_script(_MUTATION_CLOCK_JS)
         if c.draw_overlays:
             await self._context.add_init_script(_OVERLAY_JS)
         await self._context.route("**/*", self._guard)
         self.page = await self._context.new_page()
+        self.page.on("request", self._on_request)
+        self.page.on("requestfinished", self._on_request_done)
+        self.page.on("requestfailed", self._on_request_done)
         # Registered after the main page exists, so only popups and new tabs reach the handler.
         self._context.on("page", self._on_new_page)
         await self.page.goto(c.start_url, wait_until="domcontentloaded")
@@ -208,13 +279,69 @@ class Sandbox:
         png = await self.page.screenshot(type="jpeg", quality=70)
         return base64.b64encode(png).decode()
 
-    async def _settle(self) -> None:
+    def _on_request(self, request: Request) -> None:
+        if request.resource_type not in _DATA_REQUESTS:
+            return
+        now = time.monotonic()
+        # Only the last action's requests matter, and a long poll may never answer.
+        for r in [r for r, (t, _) in self._requests.items() if now - t > _REQUEST_FORGET_S]:
+            del self._requests[r]
+        self._requests[request] = [now, None]
+
+    def _on_request_done(self, request: Request) -> None:
+        if span := self._requests.get(request):
+            span[1] = time.monotonic()
+
+    async def _settle(self, quiet_ms: int = SETTLE_QUIET_MS) -> None:
+        """Wait until the page has reacted to the action, then return as soon as it has.
+
+        Not `networkidle`, which Playwright marks DISCOURAGED. After a page load it costs at least
+        500 ms with no traffic at all, which a page with polling or analytics never reaches. After
+        an in-page action it resolves at once, since the document already reached it, so it never
+        waited for the data a click fetches. Instead, wait for what an action actually changes: the
+        DOM, and the data requests the action started (see `action_requests`). The page is settled
+        once neither has moved for `quiet_ms`.
+        """
         assert self.page is not None
+        page = self.page
+        acted = self._action_started
+        # Clicks already wait for a navigation they start to commit, so only its load is left.
         try:
-            await self.page.wait_for_load_state("domcontentloaded", timeout=3_000)
-            await self.page.wait_for_load_state("networkidle", timeout=1_500)
+            await page.wait_for_load_state("domcontentloaded", timeout=3_000)
         except PlaywrightTimeout:
-            pass  # long-polling apps never go idle; the snapshot is still useful
+            return
+        settle_from = time.monotonic()  # the action itself counts as the latest change
+        deadline = settle_from + SETTLE_MAX_MS / 1000
+        window = quiet = quiet_ms / 1000
+        while True:
+            now = time.monotonic()
+            try:
+                # Milliseconds since the DOM last changed, as the init script records it.
+                since_dom = (await page.evaluate(_SINCE_MUTATION_JS)) / 1000
+            except PlaywrightError:
+                # The action navigated and this document is going away: wait for the next one.
+                if now >= deadline:
+                    return
+                try:
+                    await page.wait_for_load_state("domcontentloaded", timeout=3_000)
+                except PlaywrightTimeout:
+                    return
+                settle_from = time.monotonic()
+                continue
+            ours = action_requests(list(self._requests.values()), acted, settle_from, window)
+            busy = any(end is None for _, end in ours)
+            last_done = max([settle_from, *(end for _, end in ours if end is not None)])
+            if busy:
+                last_done = now
+            if ours:
+                quiet = SETTLE_QUIET_MS / 1000  # a debounce, if any, has already fired
+            waited = min(since_dom, now - last_done)
+            if waited >= quiet:
+                return
+            if now >= deadline:
+                log.info("settle_capped", url=page.url, busy=busy)
+                return  # polling or animating pages never go quiet; the snapshot is still useful
+            await asyncio.sleep(min(quiet - waited, _SETTLE_POLL_S, max(deadline - now, 0)))
 
     # --- actions -------------------------------------------------------------------------------
 
@@ -301,10 +428,14 @@ class Sandbox:
             return best
 
     async def _after_change(
-        self, summary: str, el: ElementInfo | None = None, policy: PolicyClass = PolicyClass.ALLOWED
+        self,
+        summary: str,
+        el: ElementInfo | None = None,
+        policy: PolicyClass = PolicyClass.ALLOWED,
+        quiet_ms: int = SETTLE_QUIET_MS,
     ) -> ToolResult:
         assert self.page is not None
-        await self._settle()
+        await self._settle(quiet_ms)
         if self.page.url != self._url_before:
             # A new page: the old highlight and cursor no longer point at anything.
             await self._overlay(EventType.OVERLAY_CLEAR)
@@ -341,6 +472,7 @@ class Sandbox:
     async def _run(self, tool: str, args: Any, confirmed: bool) -> ToolResult:
         page = self.page
         self._url_before = page.url if page else ""
+        self._action_started = time.monotonic()
         assert page is not None
 
         if tool == "operate_observe":
@@ -450,7 +582,9 @@ class Sandbox:
             await loc.fill(args.text)
             if args.submit:
                 await loc.press("Enter")
-            return await self._after_change(f'Typed into "{el.name}"', el)
+            # Search-as-you-type fields usually debounce before they fetch.
+            quiet = SETTLE_QUIET_MS if args.submit else SETTLE_TYPING_QUIET_MS
+            return await self._after_change(f'Typed into "{el.name}"', el, quiet_ms=quiet)
 
         if tool == "operate_select":
             await self._pointer_to(el, loc)
