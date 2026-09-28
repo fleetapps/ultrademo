@@ -25,7 +25,7 @@ Render dashboard > New > Blueprint > this repo. Render generates `ULTRADEMO_INTE
 | LiveKit API key and secret | api, operator, agent |
 | `ULTRADEMO_PUBLIC_BASE_URL` (the web service's `https://…onrender.com` URL) | api |
 
-The api runs its migrations on every start.
+The api runs its migrations as Render's pre-deploy command, before each deploy goes live.
 
 ## Load the example demo
 
