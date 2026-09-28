@@ -72,6 +72,11 @@ class ScreenStreamer:
         self._last_sent = 0.0
         self._last_frame: rtc.VideoFrame | None = None
         self._keepalive: asyncio.Task | None = None
+        self._pump_task: asyncio.Task | None = None
+        # The newest frame not yet published. A newer one replaces it, so the pump always ends on
+        # the page's final paint instead of dropping it for arriving too soon after the last send.
+        self._latest: str | None = None
+        self._wake = asyncio.Event()
         self._pending: set[asyncio.Task] = set()
 
     async def start(self, url: str, token: str) -> None:
@@ -88,6 +93,7 @@ class ScreenStreamer:
             "Page.startScreencast",
             {"format": "jpeg", "quality": 80, "maxWidth": self._w, "maxHeight": self._h},
         )
+        self._pump_task = asyncio.create_task(self._pump())
         self._keepalive = asyncio.create_task(self._resend_last())
 
     async def publish_overlay(self, type_: EventType, payload: dict[str, Any]) -> None:
@@ -99,20 +105,37 @@ class ScreenStreamer:
         )
 
     def _on_frame(self, params: dict) -> None:
-        task = asyncio.create_task(self._handle(params))
+        self._latest = params["data"]
+        self._wake.set()
+        task = asyncio.create_task(self._ack(params["sessionId"]))
         self._pending.add(task)
         task.add_done_callback(self._pending.discard)
 
-    async def _handle(self, params: dict) -> None:
+    async def _ack(self, frame_session_id: int) -> None:
         assert self._cdp is not None
-        await self._cdp.send("Page.screencastFrameAck", {"sessionId": params["sessionId"]})
-        now = time.monotonic()
-        if now - self._last_sent < 1 / MAX_FPS:
-            return
-        self._last_sent = now
-        frame = await asyncio.to_thread(self._decode, params["data"])
-        self._last_frame = frame
-        self._source.capture_frame(frame)
+        await self._cdp.send("Page.screencastFrameAck", {"sessionId": frame_session_id})
+
+    async def _pump(self) -> None:
+        """Publish at most MAX_FPS frames a second, always including the last one of a burst.
+
+        Chrome only sends a frame when the page repaints. Dropping a frame for arriving too soon
+        would leave the viewer on an earlier paint (the keepalive resends it) until the page
+        happens to repaint again, so a frame that arrives early waits instead and newer ones
+        replace it.
+        """
+        while True:
+            await self._wake.wait()
+            self._wake.clear()
+            wait = self._last_sent + 1 / MAX_FPS - time.monotonic()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            data, self._latest = self._latest, None
+            if data is None:
+                continue
+            frame = await asyncio.to_thread(self._decode, data)
+            self._last_sent = time.monotonic()
+            self._last_frame = frame
+            self._source.capture_frame(frame)
 
     def _decode(self, data_b64: str) -> rtc.VideoFrame:
         img = Image.open(io.BytesIO(base64.b64decode(data_b64))).convert("RGBA")
@@ -128,8 +151,9 @@ class ScreenStreamer:
                 self._source.capture_frame(self._last_frame)
 
     async def stop(self) -> None:
-        if self._keepalive:
-            self._keepalive.cancel()
+        for task in (self._keepalive, self._pump_task):
+            if task:
+                task.cancel()
         try:
             if self._cdp:
                 await self._cdp.send("Page.stopScreencast")

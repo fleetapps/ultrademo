@@ -276,7 +276,9 @@ async def entrypoint(ctx: JobContext) -> None:
         config=_brain_config(settings, sc["agent_version"].get("model") or {}),
     )
     transcript = Transcript(api)
-    end_reason = "viewer_left"
+    # Until the call is up, a shutdown means the start failed: the session is recorded as failed,
+    # not as a viewer who left.
+    end_reason = "error"
 
     async def finalize(reason: str) -> None:
         await transcript.flush()
@@ -380,6 +382,7 @@ async def entrypoint(ctx: JobContext) -> None:
         return await pointer.handle(data.caller_identity, data.payload)
 
     await api.started()
+    end_reason = "viewer_left"
     session.generate_reply()  # llm_node sees no new viewer message and greets
 
     ticker = asyncio.create_task(cost_ticker())

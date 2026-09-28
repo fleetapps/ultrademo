@@ -34,6 +34,14 @@ def _depth(value: Any, level: int = 1) -> int:
     return level - 1
 
 
+def _bounded_context(v: dict[str, Any]) -> dict[str, Any]:
+    if len(json.dumps(v).encode()) > MAX_CONTEXT_BYTES:
+        raise ValueError(f"context must be at most {MAX_CONTEXT_BYTES} bytes as JSON")
+    if _depth(v) > MAX_CONTEXT_DEPTH:
+        raise ValueError(f"context must nest at most {MAX_CONTEXT_DEPTH} levels")
+    return v
+
+
 class Person(BaseModel):
     model_config = ConfigDict(extra="forbid")
     first_name: str | None = Field(default=None, max_length=100)
@@ -63,27 +71,26 @@ class ContextLinkIn(BaseModel):
     brief: Brief | None = None
     expires_at: datetime | None = None
 
-    @field_validator("context")
-    @classmethod
-    def _bounded(cls, v: dict[str, Any]) -> dict[str, Any]:
-        if len(json.dumps(v).encode()) > MAX_CONTEXT_BYTES:
-            raise ValueError(f"context must be at most {MAX_CONTEXT_BYTES} bytes as JSON")
-        if _depth(v) > MAX_CONTEXT_DEPTH:
-            raise ValueError(f"context must nest at most {MAX_CONTEXT_DEPTH} levels")
-        return v
+    _bounded = field_validator("context")(_bounded_context)
 
 
 class DemoIn(BaseModel):
-    """Supersonik-compatible alias body."""
+    """Supersonik-compatible alias body.
+
+    It is turned into a ContextLinkIn inside the handler, where a validation error would be a 500,
+    so it carries the same limits and is rejected with a 422 before that.
+    """
 
     model_config = ConfigDict(extra="forbid")
     demo_url_slug: str
     context: dict[str, Any] = Field(default_factory=dict)
-    first_name: str | None = None
-    last_name: str | None = None
-    email: str | None = None
-    company: str | None = None
-    phone: str | None = None
+    first_name: str | None = Field(default=None, max_length=100)
+    last_name: str | None = Field(default=None, max_length=100)
+    email: str | None = Field(default=None, max_length=320)
+    company: str | None = Field(default=None, max_length=200)
+    phone: str | None = Field(default=None, max_length=40)
+
+    _bounded = field_validator("context")(_bounded_context)
 
 
 class ContextLinkOut(BaseModel):
