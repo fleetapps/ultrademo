@@ -8,7 +8,7 @@
   "agent": {
     "name": "Ava",
     "system_prompt": "You are Ava, a product expert for Acme CRM. Acme CRM helps small sales teams track deals, forecast revenue and approve discounts. Lead with the deal pipeline and the forecast; offer to book a call with sales when the viewer asks about pricing or rollout.",
-    "voice": {"voice_id": "EXAVITQu4vr4xnSDxMaL", "model": "eleven_flash_v2_5", "stt_language": "multi"},
+    "voice": {"voice_id": "EXAVITQu4vr4xnSDxMaL", "model": "eleven_flash_v2_5", "stt_language": "en"},
     "policy": {"blocked": ["\\bbilling\\b"]},
     "model": {"id": "claude-opus-5", "effort": "low"}
   },
