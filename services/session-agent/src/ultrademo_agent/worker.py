@@ -342,6 +342,9 @@ async def entrypoint(ctx: JobContext) -> None:
                     log.warning("persist_cost_failed", error=str(e)[:200])
 
     viewer = f"viewer_{session_id}"
+    # RoomIO reads the room's local participant while it starts, before AgentSession.start would
+    # connect the room itself (livekit-agents 1.8), so join first.
+    await ctx.connect()
     await session.start(
         room=ctx.room,
         agent=DemoAgent(brain),

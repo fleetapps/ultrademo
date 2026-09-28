@@ -1,0 +1,127 @@
+# Render Blueprint: the docker-compose stack as Render services (docs/render.md).
+# Frankfurt, next to the workspace's other services.
+#   Render dashboard > New > Blueprint > pick this repo. It asks for every `sync: false` value.
+#
+# LiveKit is not deployed here: Render has no inbound UDP, which WebRTC media needs. Use LiveKit
+# Cloud (or a self-hosted server elsewhere) and give its wss:// URL and API key/secret below.
+#
+# Only the player (web) and the sample product are public. The api and operator are private
+# services on Render's internal network; the session agent is a background worker that dials out
+# to LiveKit and to them.
+
+databases:
+  - name: ultrademo-db
+    databaseName: ultrademo
+    plan: basic-256mb
+    region: frankfurt
+    postgresMajorVersion: "18"
+
+services:
+  # The player the viewer opens. It calls the api server side only.
+  - type: web
+    name: ultrademo-web
+    runtime: docker
+    region: frankfurt
+    plan: starter
+    dockerfilePath: ./infra/docker/web.Dockerfile
+    dockerContext: ./apps/web
+    healthCheckPath: /healthz
+    envVars:
+      # Render's private network resolves a service by its name. Render passes dockerCommand
+      # without a shell, so the scheme can't be added to a fromService host:port at start.
+      - key: ULTRADEMO_API_URL
+        value: http://ultrademo-api:8000
+      # Your LiveKit Cloud URL, e.g. wss://your-project.livekit.cloud (the page's CSP allows it).
+      - key: ULTRADEMO_LIVEKIT_URL
+        sync: false
+
+  - type: pserv
+    name: ultrademo-api
+    runtime: docker
+    region: frankfurt
+    plan: starter
+    dockerfilePath: ./infra/docker/python-service.Dockerfile
+    dockerContext: .
+    # Builds ultrademo-api, the Dockerfile's default PACKAGE.
+    preDeployCommand: python -m ultrademo_api.migrate
+    dockerCommand: uvicorn ultrademo_api.app:create_app --factory --host 0.0.0.0 --port 8000
+    envVars:
+      - key: PORT
+        value: "8000"
+      # Shared with the operator and agent for service-to-service calls; Render generates it.
+      - key: ULTRADEMO_INTERNAL_TOKEN
+        generateValue: true
+      - key: ULTRADEMO_ENVIRONMENT
+        value: production
+      - key: ULTRADEMO_DATABASE_URL
+        fromDatabase: {name: ultrademo-db, property: connectionString}
+      # The player's public URL, e.g. https://ultrademo-web.onrender.com (links in emails, receipts).
+      - key: ULTRADEMO_PUBLIC_BASE_URL
+        sync: false
+      - key: ULTRADEMO_RECEIPT_SECRET
+        generateValue: true
+      - key: ULTRADEMO_LIVEKIT_URL
+        sync: false
+      - key: ULTRADEMO_LIVEKIT_API_KEY
+        sync: false
+      - key: ULTRADEMO_LIVEKIT_API_SECRET
+        sync: false
+
+  # Playwright sandboxes: one Chromium per live demo, so it needs memory (about 500 MB each).
+  - type: pserv
+    name: ultrademo-operator
+    runtime: docker
+    region: frankfurt
+    plan: standard
+    dockerfilePath: ./infra/docker/operator.Dockerfile
+    dockerContext: .
+    envVars:
+      - key: PORT
+        value: "8100"
+      - key: ULTRADEMO_OPERATOR_INTERNAL_TOKEN
+        fromService: {type: pserv, name: ultrademo-api, envVarKey: ULTRADEMO_INTERNAL_TOKEN}
+      - key: ULTRADEMO_OPERATOR_MAX_SANDBOXES
+        value: "2"
+      - key: ULTRADEMO_OPERATOR_LIVEKIT_URL
+        sync: false
+      - key: ULTRADEMO_OPERATOR_LIVEKIT_API_KEY
+        sync: false
+      - key: ULTRADEMO_OPERATOR_LIVEKIT_API_SECRET
+        sync: false
+
+  # The voice agent: a LiveKit worker that joins rooms when the api dispatches a session.
+  - type: worker
+    name: ultrademo-agent
+    runtime: docker
+    region: frankfurt
+    plan: standard
+    dockerfilePath: ./infra/docker/agent.Dockerfile
+    dockerContext: .
+    envVars:
+      - key: ULTRADEMO_AGENT_API_URL
+        value: http://ultrademo-api:8000
+      - key: ULTRADEMO_AGENT_OPERATOR_URL
+        value: http://ultrademo-operator:8100
+      - key: ULTRADEMO_AGENT_INTERNAL_TOKEN
+        fromService: {type: pserv, name: ultrademo-api, envVarKey: ULTRADEMO_INTERNAL_TOKEN}
+      - key: LIVEKIT_URL
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ELEVEN_API_KEY
+        sync: false
+      # ElevenLabs does speech to text too, so no Deepgram key is needed. For Deepgram, set this to
+      # "deepgram" and add DEEPGRAM_API_KEY.
+      - key: ULTRADEMO_AGENT_STT_PROVIDER
+        value: elevenlabs
+
+  # A small fake CRM the agent can demo end to end without customer credentials.
+  - type: web
+    name: ultrademo-sample-product
+    runtime: static
+    staticPublishPath: ./examples/sample-product
+    buildCommand: "true"
