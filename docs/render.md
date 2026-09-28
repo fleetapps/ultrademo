@@ -9,8 +9,9 @@ as a background worker, Postgres 18, and the sample product as a static site.
 - **LiveKit.** Render has no inbound UDP, so it cannot host the LiveKit media server. Create a
   LiveKit Cloud project (or run LiveKit elsewhere) and have its `wss://` URL, API key and API
   secret ready.
-- **Keys:** Anthropic, ElevenLabs, and Deepgram (or set `ULTRADEMO_AGENT_STT_PROVIDER=elevenlabs`
-  and skip Deepgram).
+- **Keys:** Anthropic and ElevenLabs. ElevenLabs does both speech to text and text to speech; to
+  use Deepgram for speech to text instead, set `ULTRADEMO_AGENT_STT_PROVIDER=deepgram` and add
+  `DEEPGRAM_API_KEY` on the agent.
 
 ## Create it
 
@@ -19,7 +20,7 @@ Render dashboard > New > Blueprint > this repo. Render generates `ULTRADEMO_INTE
 
 | Variable | Services |
 | --- | --- |
-| `ANTHROPIC_API_KEY`, `ELEVEN_API_KEY`, `DEEPGRAM_API_KEY` | agent |
+| `ANTHROPIC_API_KEY`, `ELEVEN_API_KEY` | agent |
 | LiveKit URL (`wss://…`) | web, api, operator, agent |
 | LiveKit API key and secret | api, operator, agent |
 | `ULTRADEMO_PUBLIC_BASE_URL` (the web service's `https://…onrender.com` URL) | api |

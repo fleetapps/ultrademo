@@ -108,11 +108,10 @@ services:
         sync: false
       - key: ELEVEN_API_KEY
         sync: false
-      # "deepgram" needs DEEPGRAM_API_KEY; "elevenlabs" uses ELEVEN_API_KEY for speech to text too.
+      # ElevenLabs does speech to text too, so no Deepgram key is needed. For Deepgram, set this to
+      # "deepgram" and add DEEPGRAM_API_KEY.
       - key: ULTRADEMO_AGENT_STT_PROVIDER
-        value: deepgram
-      - key: DEEPGRAM_API_KEY
-        sync: false
+        value: elevenlabs
 
   # A small fake CRM the agent can demo end to end without customer credentials.
   - type: web
