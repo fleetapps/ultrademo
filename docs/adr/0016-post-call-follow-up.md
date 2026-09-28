@@ -1,6 +1,6 @@
 # ADR 16: Post-call follow-up (2026-09-28)
 
-Status: accepted for the follow-up slice (`services/api`: `relay.py`, `follow_up.py`, `senders.py`; `db/migrations/0003_follow_up.sql`). Revisit each one at the point noted.
+Status: accepted for the follow-up slice (`services/api`: `relay.py`, `follow_up.py`, `senders.py`; `db/migrations/0004_follow_up.sql`). Revisit each one at the point noted.
 
 ## 1. One relay turns the outbox into deliveries
 `python -m ultrademo_api.relay` is a separate process built from the api image (compose service `relay`). It has two steps, and any number of replicas can run them side by side because every claim uses `FOR UPDATE SKIP LOCKED`:

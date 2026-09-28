@@ -1,4 +1,4 @@
--- Post-call follow-up: the outbox relay turns outbox rows into deliveries to customer webhooks,
+-- 0004: post-call follow-up: the outbox relay turns outbox rows into deliveries to customer webhooks,
 -- Slack and the viewer's inbox (ADR 16).
 --
 -- Fan-out happens in the same transaction that marks the outbox row published, so every event
