@@ -32,6 +32,7 @@ from livekit.agents import (
     llm,
     room_io,
     stt,
+    tts,
 )
 from livekit.agents.types import NOT_GIVEN, FlushSentinel
 from livekit.plugins import deepgram, elevenlabs, silero
@@ -64,8 +65,20 @@ def build_stt(settings: Settings, voice: dict[str, Any]) -> stt.STT:
         return elevenlabs.STT(
             model=settings.elevenlabs_stt_model,
             language_code=NOT_GIVEN if language == "multi" else language,
+            # Commit on each pause. livekit-agents never commits for it, so without this the
+            # viewer's turn only ends when Scribe's ~36 s buffer fills.
+            server_vad={"vad_silence_threshold_secs": settings.elevenlabs_stt_commit_silence_s},
         )
     return deepgram.STT(model=settings.stt_model, language=language)
+
+
+def build_tts(settings: Settings, voice: dict[str, Any]) -> tts.TTS:
+    """The agent's voice: ElevenLabs, from the agent version's voice config."""
+    return elevenlabs.TTS(
+        model=voice.get("model", settings.tts_model),
+        voice_id=voice.get("voice_id", settings.tts_voice_id),
+        encoding=settings.tts_encoding,
+    )
 
 
 _background: set[asyncio.Task] = set()
@@ -299,10 +312,7 @@ async def entrypoint(ctx: JobContext) -> None:
     session = AgentSession(
         vad=silero.VAD.load(),
         stt=build_stt(settings, voice),
-        tts=elevenlabs.TTS(
-            model=voice.get("model", settings.tts_model),
-            voice_id=voice.get("voice_id", settings.tts_voice_id),
-        ),
+        tts=build_tts(settings, voice),
         llm=_BrainOwnsGeneration(),
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(),

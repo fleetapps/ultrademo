@@ -19,3 +19,12 @@ def test_elevenlabs_streams_without_a_deepgram_key(monkeypatch) -> None:
     # Deepgram's "multi" means auto-detect, which Scribe does when given no language.
     assert s._opts.language_code is None
     assert build_stt(settings, {"stt_language": "de"})._opts.language_code == "de"
+
+
+def test_elevenlabs_commits_on_each_pause(monkeypatch) -> None:
+    # Without a VAD commit strategy Scribe finalizes only every ~36 s of audio, and the agent
+    # waits for a final transcript before it answers.
+    monkeypatch.setenv("ELEVEN_API_KEY", "el-test")
+    settings = Settings(stt_provider="elevenlabs", elevenlabs_stt_commit_silence_s=0.6)
+    s = build_stt(settings, {"stt_language": "en"})
+    assert s._opts.server_vad == {"vad_silence_threshold_secs": 0.6}
