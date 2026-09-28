@@ -9,6 +9,8 @@ Request shape (checked against the Claude API docs, see docs/04 §2 notes):
 - Opus 5 with adaptive thinking (its default when `thinking` is omitted) and a per-agent effort.
 - Frozen, strict tool list; explicit cache breakpoint on the static system block plus top-level
   automatic caching for the growing conversation.
+- `warm()` writes that cache with a `max_tokens: 0` request while the browser starts, so the
+  greeting reads the tools and system prompt from cache instead of paying for a cold prefill.
 - Context editing clears old tool results once the prompt is large (snapshots dominate tokens).
 - `fallbacks: "default"` re-runs a declined turn on the recommended fallback model server-side.
 - Stop reasons are checked before any tool runs; refused or truncated turns never execute tools.
@@ -169,6 +171,33 @@ class Brain:
             betas.append(BETA_FALLBACK)
         params["betas"] = betas
         return params
+
+    async def warm(self) -> None:
+        """Write the prompt cache for the tools and system prompt before the first turn.
+
+        A `max_tokens: 0` request only runs prefill: it writes the cache at the static system
+        breakpoint and returns no content, with no output tokens billed. It renders the same
+        prefix as a real turn (model, tools, system, thinking, effort), so the greeting hits it.
+        Not streamed (`max_tokens: 0` rejects `stream`), and without top-level caching, which would
+        also cache the placeholder message. The fallback only matters for generated output, so it
+        is left off. Best effort: if this fails, the greeting pays for the cold cache as before.
+        """
+        params = self.request_params()
+        del params["cache_control"]
+        params.pop("fallbacks", None)
+        params["betas"] = [b for b in params["betas"] if b != BETA_FALLBACK]
+        params |= {"max_tokens": 0, "messages": [{"role": "user", "content": "warmup"}]}
+        try:
+            final = await self._client.beta.messages.create(**params)
+        except anthropic.APIError as e:
+            log.warning("cache_warmup_failed", error=type(e).__name__, detail=str(e)[:300])
+            return
+        self._account(final)
+        log.info(
+            "cache_warmed",
+            written=final.usage.cache_creation_input_tokens or 0,
+            read=final.usage.cache_read_input_tokens or 0,
+        )
 
     def take_usage(self) -> Usage:
         u, self._unreported = self._unreported, Usage()

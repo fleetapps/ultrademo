@@ -283,6 +283,8 @@ async def entrypoint(ctx: JobContext) -> None:
 
     ctx.add_shutdown_callback(finalize)
 
+    # Warm Claude's prompt cache while the browser starts, so the greeting doesn't pay for it.
+    _spawn(brain.warm())
     # Start the screen before the voice, so the viewer never hears "look at this" over a black tile.
     await operator.start(
         session_id=session_id,
