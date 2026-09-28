@@ -3,6 +3,8 @@ import copy
 from types import SimpleNamespace as NS
 from typing import Any
 
+import anthropic
+import httpx2
 import pytest
 from ultrademo_agent.brain import BETA_CONTEXT_EDITING, BETA_FALLBACK, FLUSH, INTERRUPTED, Brain
 from ultrademo_agent.prompt import KICKOFF, ROUND_LIMIT_LINE, session_system, static_system
@@ -63,7 +65,9 @@ class FakeClient:
         self.script = list(script)
         self.calls: list[dict[str, Any]] = []
         self.delay = delay
-        self.beta = NS(messages=NS(stream=self._stream))
+        self.beta = NS(messages=NS(stream=self._stream, create=self._create))
+        self.created: list[dict[str, Any]] = []
+        self.create_error: Exception | None = None
 
     def _stream(self, **params):
         self.calls.append(
@@ -71,6 +75,19 @@ class FakeClient:
             | {"messages": copy.deepcopy(params["messages"])}
         )
         return FakeStream(self.script.pop(0), self.delay)
+
+    async def _create(self, **params):
+        self.created.append(copy.deepcopy(params))
+        if self.create_error:
+            raise self.create_error
+        final = message([], "max_tokens")
+        final.usage = NS(
+            input_tokens=10,
+            output_tokens=0,
+            cache_read_input_tokens=0,
+            cache_creation_input_tokens=9000,
+        )
+        return final
 
 
 class FakeOperator:
@@ -161,6 +178,36 @@ def test_tool_definitions_are_valid_for_claude():
 def test_prompt_is_deterministic_and_marks_data():
     a, b = session_system(CTX), session_system(copy.deepcopy(CTX))
     assert a == b and "not instructions" in a and '"company": "Hooli"' in a
+
+
+async def test_warm_writes_the_same_prefix_as_a_real_turn():
+    client = FakeClient([message([text("Hi, I'm Ava.")], "end_turn")])
+    b = brain(client)
+    await b.warm()
+    warm = client.created[0]
+    assert warm["max_tokens"] == 0 and "stream" not in warm
+    assert warm["messages"] == [{"role": "user", "content": "warmup"}]
+    # No top-level caching: it would cache the placeholder instead of stopping at the system.
+    assert "cache_control" not in warm
+    assert "fallbacks" not in warm and warm["betas"] == [BETA_CONTEXT_EDITING]
+    assert b.messages == [] and b.usage.cache_creation_input_tokens == 9000
+
+    await collect(b.respond(None))
+    real = client.calls[0]
+    # Everything rendered before the messages must match, or the greeting misses the cache.
+    for key in ("model", "tools", "system", "output_config", "context_management"):
+        assert warm[key] == real[key], key
+    assert "thinking" not in warm and "thinking" not in real
+
+
+async def test_warm_failure_is_not_fatal():
+    client = FakeClient([message([text("Hi, I'm Ava.")], "end_turn")])
+    client.create_error = anthropic.APIConnectionError(request=httpx2.Request("POST", "https://a"))
+    b = brain(client)
+    await b.warm()
+    assert b.usage.cache_creation_input_tokens == 0
+    out = await collect(b.respond(None))
+    assert "".join(o for o in out if isinstance(o, str)).startswith("Hi, I'm Ava.")
 
 
 async def test_plain_answer_and_request_shape():

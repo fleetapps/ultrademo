@@ -199,3 +199,53 @@ async def test_brain_over_real_sdk_stream():
     }
     assert second["messages"][2]["content"][0]["tool_use_id"] == "toolu_1"
     assert brain.usage.cache_read_input_tokens == 8000 and brain.usage.output_tokens == 60
+
+
+async def test_warm_over_real_sdk():
+    """SDK 1.8 sends max_tokens 0 unstreamed and parses the empty prefill-only response."""
+    requests: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        return httpx2.Response(
+            200,
+            json={
+                "id": "msg_w",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-opus-5",
+                "content": [],
+                "stop_reason": "max_tokens",
+                "stop_sequence": None,
+                "usage": {
+                    "input_tokens": 12,
+                    "output_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                    "cache_creation_input_tokens": 9000,
+                },
+            },
+        )
+
+    client = anthropic.AsyncAnthropic(
+        api_key="test",
+        base_url="https://api.test",
+        http_client=anthropic.DefaultAsyncHttpxClient(transport=httpx2.MockTransport(handler)),
+        max_retries=0,
+    )
+    brain = Brain(
+        client,
+        Op(),
+        Hooks(),
+        static_system=static_system("Show approvals.", {"name": "Acme", "base_url": "https://a"}),
+        session_system=session_system({"locale": "en"}),
+    )
+    await brain.warm()
+
+    (req,) = requests
+    assert req.url.path == "/v1/messages"
+    assert req.headers["anthropic-beta"] == "context-management-2025-06-27"
+    body = json.loads(req.content)
+    assert body["max_tokens"] == 0 and not body.get("stream")
+    assert "cache_control" not in body and "fallbacks" not in body
+    assert body["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert brain.usage.cache_creation_input_tokens == 9000 and brain.usage.output_tokens == 0
