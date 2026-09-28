@@ -25,12 +25,12 @@ services:
     plan: starter
     dockerfilePath: ./infra/docker/web.Dockerfile
     dockerContext: ./apps/web
-    # fromService gives host:port with no scheme, so the start command adds it.
-    dockerCommand: sh -c 'ULTRADEMO_API_URL="http://$API_HOSTPORT" exec node server.js'
     healthCheckPath: /healthz
     envVars:
-      - key: API_HOSTPORT
-        fromService: {type: pserv, name: ultrademo-api, property: hostport}
+      # Render's private network resolves a service by its name. Render passes dockerCommand
+      # without a shell, so the scheme can't be added to a fromService host:port at start.
+      - key: ULTRADEMO_API_URL
+        value: http://ultrademo-api:8000
       # Your LiveKit Cloud URL, e.g. wss://your-project.livekit.cloud (the page's CSP allows it).
       - key: ULTRADEMO_LIVEKIT_URL
         sync: false
@@ -43,7 +43,8 @@ services:
     dockerfilePath: ./infra/docker/python-service.Dockerfile
     dockerContext: .
     # Builds ultrademo-api, the Dockerfile's default PACKAGE.
-    dockerCommand: sh -c 'python -m ultrademo_api.migrate && exec uvicorn ultrademo_api.app:create_app --factory --host 0.0.0.0 --port 8000'
+    preDeployCommand: python -m ultrademo_api.migrate
+    dockerCommand: uvicorn ultrademo_api.app:create_app --factory --host 0.0.0.0 --port 8000
     envVars:
       - key: PORT
         value: "8000"
@@ -96,12 +97,11 @@ services:
     plan: standard
     dockerfilePath: ./infra/docker/agent.Dockerfile
     dockerContext: .
-    dockerCommand: sh -c 'ULTRADEMO_AGENT_API_URL="http://$API_HOSTPORT" ULTRADEMO_AGENT_OPERATOR_URL="http://$OPERATOR_HOSTPORT" exec python -m livekit.agents start services/session-agent/src/ultrademo_agent/worker.py'
     envVars:
-      - key: API_HOSTPORT
-        fromService: {type: pserv, name: ultrademo-api, property: hostport}
-      - key: OPERATOR_HOSTPORT
-        fromService: {type: pserv, name: ultrademo-operator, property: hostport}
+      - key: ULTRADEMO_AGENT_API_URL
+        value: http://ultrademo-api:8000
+      - key: ULTRADEMO_AGENT_OPERATOR_URL
+        value: http://ultrademo-operator:8100
       - key: ULTRADEMO_AGENT_INTERNAL_TOKEN
         fromService: {type: pserv, name: ultrademo-api, envVarKey: ULTRADEMO_INTERNAL_TOKEN}
       - key: LIVEKIT_URL
