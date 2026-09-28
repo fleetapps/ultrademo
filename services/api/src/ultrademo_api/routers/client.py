@@ -12,6 +12,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from ultrademo_protocol import WebhookTopic, webhooks
 
 from ultrademo_api.db import Database
 from ultrademo_api.deps import get_db, get_settings_dep, require
@@ -343,3 +344,164 @@ async def get_transcript(
             session_id,
         )
     return [TranscriptMessageOut(**dict(r)) for r in rows]
+
+
+# -- Webhook and Slack endpoints (post-call follow-up, ADR 16) -----------------------------------
+
+MAX_ENDPOINTS = 20
+
+
+class EndpointIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["webhook", "slack"] = "webhook"
+    url: str = Field(min_length=8, max_length=2048)
+    # Empty means every topic. Slack only ever posts `session.ended` and `cta.clicked`.
+    topics: list[WebhookTopic] = Field(default_factory=list, max_length=len(WebhookTopic))
+    description: str = Field(default="", max_length=200)
+
+
+class EndpointOut(BaseModel):
+    id: UUID
+    kind: str
+    url: str
+    topics: list[str]
+    description: str
+    created_at: datetime
+
+
+class EndpointCreated(EndpointOut):
+    # Only on create, only for webhooks: verify requests with it (Standard Webhooks).
+    secret: str | None
+
+
+class DeliveryOut(BaseModel):
+    id: UUID
+    event_id: UUID
+    type: str
+    status: str
+    attempts: int
+    response_status: int | None
+    last_error: str | None
+    created_at: datetime
+    sent_at: datetime | None
+
+
+def _check_endpoint_url(settings: Settings, body: EndpointIn) -> None:
+    if body.kind == "slack" and not body.url.startswith("https://hooks.slack.com/"):
+        raise ApiError(
+            422,
+            "invalid_url",
+            "A Slack endpoint is an incoming webhook URL (https://hooks.slack.com/...)",
+        )
+    if not body.url.startswith("https://") and not (
+        settings.allow_private_targets and body.url.startswith("http://")
+    ):
+        raise ApiError(422, "invalid_url", "Endpoint URLs must use https")
+
+
+@router.post("/webhook-endpoints", status_code=201, response_model=EndpointCreated)
+async def create_endpoint(
+    body: EndpointIn,
+    principal: Annotated[Principal, Depends(require("webhooks:write"))],
+    db: Annotated[Database, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+) -> EndpointCreated:
+    _check_endpoint_url(settings, body)
+    secret = webhooks.new_secret() if body.kind == "webhook" else None
+    topics = sorted({t.value for t in body.topics})
+    async with db.tenant(principal.org_id) as conn:
+        count = await conn.fetchval("SELECT count(*) FROM endpoints WHERE disabled_at IS NULL")
+        if count >= MAX_ENDPOINTS:
+            raise ApiError(409, "too_many_endpoints", f"At most {MAX_ENDPOINTS} endpoints")
+        r = await conn.fetchrow(
+            "INSERT INTO endpoints (org_id, kind, url, secret, topics, description)"
+            " VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at",
+            principal.org_id,
+            body.kind,
+            body.url,
+            secret,
+            topics,
+            body.description,
+        )
+        await conn.execute(
+            "INSERT INTO audit_logs (org_id, actor_kind, actor_id, action, target_type, target_id, diff)"
+            " VALUES ($1, 'api_key', $2, 'endpoint.created', 'endpoint', $3, $4)",
+            principal.org_id,
+            str(principal.key_id),
+            str(r["id"]),
+            {"kind": body.kind, "url": body.url, "topics": topics},
+        )
+    return EndpointCreated(
+        id=r["id"],
+        kind=body.kind,
+        url=body.url,
+        topics=topics,
+        description=body.description,
+        created_at=r["created_at"],
+        secret=secret,
+    )
+
+
+@router.get("/webhook-endpoints", response_model=Page[EndpointOut])
+async def list_endpoints(
+    principal: Annotated[Principal, Depends(require("webhooks:read"))],
+    db: Annotated[Database, Depends(get_db)],
+) -> Page[EndpointOut]:
+    async with db.tenant(principal.org_id) as conn:
+        rows = await conn.fetch(
+            "SELECT id, kind, url, topics, description, created_at FROM endpoints"
+            " WHERE disabled_at IS NULL ORDER BY created_at"
+        )
+    return Page(items=[EndpointOut(**dict(r)) for r in rows], next_cursor=None)
+
+
+@router.delete("/webhook-endpoints/{endpoint_id}", status_code=204)
+async def delete_endpoint(
+    endpoint_id: UUID,
+    principal: Annotated[Principal, Depends(require("webhooks:write"))],
+    db: Annotated[Database, Depends(get_db)],
+) -> None:
+    # Disabled rather than deleted, so its delivery history stays readable; pending deliveries die.
+    async with db.tenant(principal.org_id) as conn:
+        done = await conn.fetchval(
+            "UPDATE endpoints SET disabled_at = now() WHERE id = $1 AND disabled_at IS NULL"
+            " RETURNING id",
+            endpoint_id,
+        )
+        if not done:
+            raise ApiError(404, "not_found", "Endpoint not found")
+        await conn.execute(
+            "UPDATE deliveries SET status = 'dead', last_error = 'endpoint disabled'"
+            " WHERE endpoint_id = $1 AND status = 'pending'",
+            endpoint_id,
+        )
+        await conn.execute(
+            "INSERT INTO audit_logs (org_id, actor_kind, actor_id, action, target_type, target_id)"
+            " VALUES ($1, 'api_key', $2, 'endpoint.disabled', 'endpoint', $3)",
+            principal.org_id,
+            str(principal.key_id),
+            str(endpoint_id),
+        )
+
+
+@router.get("/webhook-endpoints/{endpoint_id}/deliveries", response_model=list[DeliveryOut])
+async def list_deliveries(
+    endpoint_id: UUID,
+    principal: Annotated[Principal, Depends(require("webhooks:read"))],
+    db: Annotated[Database, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> list[DeliveryOut]:
+    """The latest deliveries to one endpoint, newest first: what to look at when events go missing."""
+    async with db.tenant(principal.org_id) as conn:
+        if not await conn.fetchval("SELECT 1 FROM endpoints WHERE id = $1", endpoint_id):
+            raise ApiError(404, "not_found", "Endpoint not found")
+        rows = await conn.fetch(
+            "SELECT d.id, d.outbox_id AS event_id, o.topic AS type, d.status, d.attempts,"
+            " d.response_status, d.last_error, d.created_at, d.sent_at"
+            " FROM deliveries d JOIN outbox o ON o.id = d.outbox_id"
+            " WHERE d.endpoint_id = $1 ORDER BY d.created_at DESC, o.created_at DESC, d.id DESC"
+            " LIMIT $2",
+            endpoint_id,
+            limit,
+        )
+    return [DeliveryOut(**dict(r)) for r in rows]

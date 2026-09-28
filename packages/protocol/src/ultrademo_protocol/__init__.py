@@ -1,7 +1,7 @@
 """Wire contracts shared by api, operator and session-agent.
 
-One source of truth for the realtime envelope (docs/04 §1), the agent tool surface (docs/04 §2)
-and policy classes, so the three services cannot drift apart.
+One source of truth for the realtime envelope (docs/04 §1), the agent tool surface (docs/04 §2),
+policy classes and the outbound webhook envelope, so the three services cannot drift apart.
 """
 
 from ultrademo_protocol.envelope import (
@@ -27,6 +27,7 @@ from ultrademo_protocol.tools import (
     claude_tool_definitions,
     parse_tool_input,
 )
+from ultrademo_protocol.webhooks import WebhookEvent, WebhookTopic
 
 __all__ = [
     "ATTR_AGENT_STATE",
@@ -41,6 +42,8 @@ __all__ = [
     "TOOL_NAME_RE",
     "TOPIC_EVENTS",
     "TOPIC_TRANSCRIPTION",
+    "WebhookEvent",
+    "WebhookTopic",
     "AgentState",
     "Envelope",
     "EventType",

@@ -4,6 +4,7 @@ import uuid
 import asyncpg
 import httpx
 import pytest
+from api_helpers import spec
 from ultrademo_api.app import create_app
 from ultrademo_api.bootstrap import bootstrap
 from ultrademo_api.db import Database
@@ -13,25 +14,6 @@ from ultrademo_api.settings import Settings
 ADMIN_DSN = os.environ.get(
     "ULTRADEMO_TEST_ADMIN_DSN", "postgresql://postgres@localhost:5432/postgres"
 )
-
-
-def spec(slug: str, status: str = "published", **launch_config) -> dict:
-    return {
-        "organization": {"slug": slug, "name": slug.title()},
-        "product": {
-            "name": f"{slug} CRM",
-            "base_url": f"https://app.{slug}.example",
-            "allowed_domains": [f"app.{slug}.example"],
-        },
-        "agent": {"name": "Ava", "system_prompt": f"You demo the {slug} CRM."},
-        "launch_config": {
-            "slug": f"{slug}-demo",
-            "name": f"{slug} demo",
-            "status": status,
-            "ctas": [{"kind": "book", "label": "Book a call", "url": "https://cal.example/x"}],
-            **launch_config,
-        },
-    }
 
 
 @pytest.fixture(scope="session")

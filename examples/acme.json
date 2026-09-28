@@ -19,6 +19,7 @@
     "status": "published",
     "ctas": [{"kind": "book", "label": "Book a call with sales", "url": "https://cal.example/acme"}],
     "form_schema": {"fields": [{"name": "email", "label": "Work email", "type": "email", "required": true}]},
-    "branding": {"accent": "#0f7f82"}
+    "branding": {"accent": "#0f7f82"},
+    "follow_up": {"email": {"enabled": true, "message": "If you'd like to see approvals or forecasting with your own data, book a time below."}}
   }
 }
