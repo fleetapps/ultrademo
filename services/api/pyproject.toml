@@ -1,7 +1,7 @@
 [project]
 name = "ultrademo-api"
 version = "0.1.0"
-description = "Control plane: orgs, API keys, launch configs, context links, sessions, Client API v1"
+description = "Control plane: orgs, API keys, launch configs, context links, sessions, Client API v1, outbox relay"
 requires-python = ">=3.12"
 dependencies = [
   "ultrademo-protocol",
@@ -12,10 +12,8 @@ dependencies = [
   "argon2-cffi==25.1.0",
   "livekit-api==1.2.1",
   "structlog==26.1.0",
+  "httpx==0.28.1",
 ]
-
-[dependency-groups]
-dev = ["httpx==0.28.1"]
 
 [build-system]
 requires = ["hatchling"]

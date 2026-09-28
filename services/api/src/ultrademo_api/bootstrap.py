@@ -18,7 +18,13 @@ from ultrademo_api.db import _init_connection
 from ultrademo_api.security import generate_api_key
 from ultrademo_api.settings import get_settings
 
-DEFAULT_SCOPES = ["launch_configs:read", "context_links:write", "sessions:read"]
+DEFAULT_SCOPES = [
+    "launch_configs:read",
+    "context_links:write",
+    "sessions:read",
+    "webhooks:read",
+    "webhooks:write",
+]
 
 
 async def bootstrap(dsn: str, spec: dict[str, Any]) -> dict[str, str]:
@@ -65,8 +71,8 @@ async def bootstrap(dsn: str, spec: dict[str, Any]) -> dict[str, str]:
             lc = spec["launch_config"]
             await conn.execute(
                 "INSERT INTO launch_configs (org_id, slug, name, description, status, agent_version_id,"
-                " ctas, embed_origins, form_schema, branding)"
-                " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                " ctas, embed_origins, form_schema, branding, follow_up)"
+                " VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
                 org_id,
                 lc["slug"],
                 lc["name"],
@@ -77,6 +83,7 @@ async def bootstrap(dsn: str, spec: dict[str, Any]) -> dict[str, str]:
                 lc.get("embed_origins", []),
                 lc.get("form_schema"),
                 lc.get("branding", {}),
+                lc.get("follow_up", {}),
             )
             key = generate_api_key()
             await conn.execute(

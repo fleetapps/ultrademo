@@ -46,6 +46,19 @@ services:
     ports: ["8000:8000"]
     depends_on: {postgres: {condition: service_healthy}}
 
+  # Delivers the outbox: customer webhooks, Slack alerts and the viewer's follow-up email.
+  relay:
+    build: {context: ., dockerfile: infra/docker/python-service.Dockerfile, args: {PACKAGE: ultrademo-api}}
+    command: ["python", "-m", "ultrademo_api.relay"]
+    environment:
+      ULTRADEMO_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ultrademo
+      ULTRADEMO_PUBLIC_BASE_URL: http://localhost:3000
+      ULTRADEMO_SMTP_URL: ${ULTRADEMO_SMTP_URL:-}
+      ULTRADEMO_EMAIL_FROM: ${ULTRADEMO_EMAIL_FROM:-}
+    # The api runs the migrations; the relay only starts once they have.
+    depends_on: {api: {condition: service_started}}
+    restart: on-failure
+
   operator:
     build: {context: ., dockerfile: infra/docker/operator.Dockerfile}
     environment:

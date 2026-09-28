@@ -33,6 +33,19 @@ class Settings(BaseSettings):
     # Verified API keys are cached briefly so argon2 runs once per key per window, not per request.
     api_key_cache_ttl_s: int = 60
 
+    # Outbox relay (`python -m ultrademo_api.relay`): webhooks, Slack alerts and follow-up email.
+    relay_poll_s: float = 1.0
+    relay_batch: int = 100
+    relay_concurrency: int = 10
+    webhook_timeout_s: float = 10.0
+    # Webhook and Slack URLs must be https and resolve to public addresses. Tests and local
+    # receivers can turn this off; production never should.
+    allow_private_targets: bool = False
+    # Follow-up email. Empty `smtp_url` turns email off. `smtp://user:pass@host:587` uses STARTTLS;
+    # `smtps://...:465` uses implicit TLS.
+    smtp_url: SecretStr = SecretStr("")
+    email_from: str = ""
+
     def check_secrets(self) -> None:
         """Development defaults are public; a production api must be given its own secrets."""
         if self.environment != "production":
@@ -45,6 +58,8 @@ class Settings(BaseSettings):
         weak = [name for name, (v, d) in defaults.items() if v.get_secret_value() in ("", d)]
         if weak:
             raise RuntimeError(f"Set real values for {', '.join(weak)} in production")
+        if self.allow_private_targets:
+            raise RuntimeError("ULTRADEMO_ALLOW_PRIVATE_TARGETS must be off in production")
 
 
 @lru_cache
