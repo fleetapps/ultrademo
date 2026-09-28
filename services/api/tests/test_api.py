@@ -84,6 +84,18 @@ async def test_context_limits(client, orgs):
     assert r.status_code == 422
     assert r.json()["error"] == "validation_error"
 
+    # The Supersonik alias enforces the same limits, as a 422 rather than a server error.
+    for body in (
+        {"demo_url_slug": "acme-demo", "context": deep},
+        {"demo_url_slug": "acme-demo", "context": {"notes": "x" * 40_000}},
+        {"demo_url_slug": "acme-demo", "company": "x" * 500},
+    ):
+        r = await client.post(
+            "/v1/client/demos", headers=bearer(orgs["acme"]["api_key"]), json=body
+        )
+        assert r.status_code == 422, r.text
+        assert r.json()["error"] == "validation_error"
+
 
 async def test_unpublished_demo_is_not_startable(client):
     r = await client.post("/v1/public/sessions", json={"slug": "initech-demo"})
