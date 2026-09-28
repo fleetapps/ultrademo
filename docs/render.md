@@ -29,11 +29,13 @@ The api runs its migrations as Render's pre-deploy command, before each deploy g
 
 ## Load the example demo
 
-The example points at the compose hostname, so point it at the deployed sample product, then
+The example points at the compose hostname, so point its URL and allowed domain at the deployed
+sample product (the operator refuses a start URL outside the allowed domains), then
 bootstrap from the api's Shell tab:
 
 ```sh
-sed -i 's#http://sample-product:8080#https://ultrademo-sample-product.onrender.com#' examples/acme.json
+sed -i -e 's#http://sample-product:8080#https://ultrademo-sample-product.onrender.com#' \
+  -e 's#"sample-product"#"ultrademo-sample-product.onrender.com"#' examples/acme.json
 python -m ultrademo_api.bootstrap examples/acme.json
 ```
 
