@@ -1,0 +1,28 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Acme CRM · Live</title></head><body>
+<main><h1>Live</h1>
+<button id="load">Load deals</button>
+<button id="noop">Do nothing</button>
+<button id="tick">Start ticker</button>
+<label>Find customer <input type="search" id="find"></label>
+<ul id="out"></ul><p id="clock"></p>
+</main>
+<script>
+const out = document.getElementById('out');
+// Background traffic a real product has: it never lets the network go idle.
+if (location.search.includes('poll')) setInterval(() => fetch('/data.json?delay=50'), 400);
+document.getElementById('load').onclick = async () => {
+  out.innerHTML = '<li>Loading…</li>';
+  const d = await (await fetch('/data.json?delay=600')).json();
+  out.innerHTML = d.deals.map(n => '<li>' + n + '</li>').join('');
+};
+let t;
+document.getElementById('find').oninput = e => {
+  clearTimeout(t);
+  t = setTimeout(async () => {
+    await fetch('/data.json?delay=200');
+    out.innerHTML = '<li>Customer ' + e.target.value + '</li>';
+  }, 300);
+};
+document.getElementById('tick').onclick = () =>
+  setInterval(() => { document.getElementById('clock').textContent = performance.now(); }, 50);
+</script></body></html>

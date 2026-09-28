@@ -2,7 +2,13 @@ import re
 
 import pytest
 from ultrademo_operator.policy import Policy
-from ultrademo_operator.sandbox import Sandbox, SandboxConfig, host_allowed, parse_elements
+from ultrademo_operator.sandbox import (
+    Sandbox,
+    SandboxConfig,
+    action_requests,
+    host_allowed,
+    parse_elements,
+)
 from ultrademo_protocol import PolicyClass
 
 
@@ -184,3 +190,64 @@ async def test_overlay_events_and_pointing(sandbox):
     sandbox.on_overlay = broken
     r = await sandbox.execute("operate_navigate", {"url": "/index.html"})
     assert r.status == "ok"
+
+
+# --- settling after an action ---------------------------------------------------------------------
+
+
+def test_action_requests_ignore_background_traffic():
+    # The action ran from t=10.0 to 10.2; the page settles no sooner than 10.3 (quiet = 0.1).
+    before = [9.9, 10.05]  # started before the action: not the action's
+    fetch = [10.1, 10.6]  # started by the click
+    chained = [10.65, 10.9]  # started 50 ms after the click's fetch answered
+    parallel = [10.5, 10.8]  # started while the click's fetch was in flight
+    poll = [11.5, 11.6]  # a poll long after everything went quiet
+    spans = [before, fetch, chained, parallel, poll]
+    assert action_requests(spans, 10.0, 10.2, 0.1) == [fetch, parallel, chained]
+    assert action_requests([before, poll], 10.0, 10.2, 0.1) == []
+    # Anything that starts while one of the action's requests is still in flight is its too.
+    pending = [10.1, None]
+    assert action_requests([pending, poll], 10.0, 10.2, 0.1) == [pending, poll]
+    # A debounce fires after the quiet window only if the window is long enough to reach it.
+    debounced = [10.5, 10.7]
+    assert action_requests([debounced], 10.0, 10.2, 0.1) == []
+    assert action_requests([debounced], 10.0, 10.2, 0.4) == [debounced]
+
+
+async def _live(sandbox, query: str = ""):
+    r = await sandbox.execute("operate_navigate", {"url": f"/live.html{query}"})
+    assert r.status == "ok", r.summary
+    return r
+
+
+async def test_waits_for_the_data_a_click_fetches(sandbox):
+    r = await _live(sandbox)
+    r = await sandbox.execute("operate_click", {"ref": ref_for(r.snapshot, "button", "Load deals")})
+    assert r.status == "ok"
+    assert "Pied Piper pilot" in r.snapshot and "Loading" not in r.snapshot
+    assert r.latency_ms < 1_300  # the 600 ms response plus a short quiet window
+
+
+async def test_no_idle_wait_on_a_page_that_keeps_polling(sandbox):
+    # `networkidle` never arrives here, so the old wait always burned its full 1.5 s.
+    r = await _live(sandbox, "?poll")
+    r = await sandbox.execute("operate_click", {"ref": ref_for(r.snapshot, "button", "Do nothing")})
+    assert r.status == "ok"
+    assert r.latency_ms < 600
+
+
+async def test_waits_out_a_search_debounce(sandbox):
+    r = await _live(sandbox)
+    field = ref_for(r.snapshot, "searchbox", "Find customer")
+    r = await sandbox.execute("operate_type", {"ref": field, "text": "Hooli"})
+    assert r.status == "ok"
+    assert "Customer Hooli" in r.snapshot
+
+
+async def test_a_page_that_never_goes_quiet_is_capped(sandbox):
+    r = await _live(sandbox)
+    r = await sandbox.execute(
+        "operate_click", {"ref": ref_for(r.snapshot, "button", "Start ticker")}
+    )
+    assert r.status == "ok"
+    assert 1_400 <= r.latency_ms < 2_500
