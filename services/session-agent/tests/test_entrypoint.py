@@ -89,3 +89,41 @@ async def test_connects_the_room_before_starting_the_voice_session(monkeypatch) 
     with pytest.raises(_Stop):
         await worker.entrypoint(ctx)
     assert seen == {"connected": True}
+
+
+async def test_a_failed_start_is_recorded_as_an_error(monkeypatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    ended: list[str] = []
+    callbacks: list[Any] = []
+
+    class Api(FakeApi):
+        async def transcript(self, lines: Any) -> None:
+            pass
+
+        async def ended(self, reason: str, summary: Any, turns: int) -> None:
+            ended.append(reason)
+
+        async def aclose(self) -> None:
+            pass
+
+    class BusyOperator(FakeOperator):
+        async def start(self, **body: Any) -> dict[str, Any]:
+            raise RuntimeError("operator at capacity")
+
+        async def stop(self) -> None:
+            pass
+
+        async def aclose(self) -> None:
+            pass
+
+    class Ctx(FakeContext):
+        def add_shutdown_callback(self, fn: Any) -> None:
+            callbacks.append(fn)
+
+    monkeypatch.setattr(worker, "ApiClient", Api)
+    monkeypatch.setattr(worker, "OperatorClient", BusyOperator)
+    with pytest.raises(RuntimeError):
+        await worker.entrypoint(Ctx())
+    for fn in callbacks:
+        await fn("job failed")
+    assert ended == ["error"]

@@ -1,5 +1,6 @@
 """HTTP clients for the api (session context, transcript, actions, cost) and the operator."""
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -65,8 +66,16 @@ class OperatorClient:
         )
         self.sandbox_id: str | None = None
 
-    async def start(self, **body: Any) -> dict[str, Any]:
-        r = await self._http.post("/sandboxes", json=body)
+    async def start(self, *, busy_retries: int = 5, **body: Any) -> dict[str, Any]:
+        # A full operator answers 503 with Retry-After. A sandbox is often about to free up (a call
+        # just ended, the reaper is closing one), so wait a little before failing the session.
+        for _ in range(busy_retries):
+            r = await self._http.post("/sandboxes", json=body)
+            if r.status_code != 503:
+                break
+            await asyncio.sleep(min(float(r.headers.get("retry-after") or 2), 5.0))
+        else:
+            r = await self._http.post("/sandboxes", json=body)
         r.raise_for_status()
         out = r.json()
         self.sandbox_id = out["sandbox_id"]
