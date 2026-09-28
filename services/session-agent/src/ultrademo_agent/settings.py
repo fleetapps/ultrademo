@@ -34,8 +34,14 @@ class Settings(BaseSettings):
     stt_model: str = "nova-3"
     # Only `scribe_v2_realtime` streams; the other Scribe models transcribe after each turn.
     elevenlabs_stt_model: str = "scribe_v2_realtime"
+    # Scribe finalizes a transcript after this much silence. The agent answers only on a final
+    # transcript, and left to itself Scribe finalizes once per ~36 s of audio.
+    elevenlabs_stt_commit_silence_s: float = 0.8
     tts_model: str = "eleven_flash_v2_5"
     tts_voice_id: str = "EXAVITQu4vr4xnSDxMaL"
+    # ElevenLabs output format. The plugin's default, 32 kbps MP3, sounds thin and robotic once
+    # WebRTC re-encodes it; PCM is lossless and needs no decoding.
+    tts_encoding: str = "pcm_24000"
 
     confirm_timeout_s: float = 20.0
 
