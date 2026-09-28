@@ -49,6 +49,29 @@ describe("transcript", () => {
     expect(upsertLine([], { id: "x", speaker: "agent", text: "  ", final: false, at: 1 })).toEqual([]);
   });
 
+  it("starts a new viewer line when a reused segment id comes back after the agent spoke", () => {
+    // STT never finalized the first utterance, so the agent kept its segment id for the next one.
+    let lines = upsertLine([], { id: "u1", speaker: "viewer", text: "hi there", final: false, at: 1 });
+    lines = upsertLine(lines, { id: "a1", speaker: "agent", text: "Hello! Want a tour?", final: true, at: 2 });
+    lines = upsertLine(lines, { id: "u1", speaker: "viewer", text: "yes show", final: false, at: 3 });
+    lines = upsertLine(lines, { id: "u1", speaker: "viewer", text: "yes show me the deals", final: true, at: 3 });
+    expect(lines.map((l) => [l.id, l.speaker, l.text, l.final])).toEqual([
+      ["u1", "viewer", "hi there", true],
+      ["a1", "agent", "Hello! Want a tour?", true],
+      ["u1~2", "viewer", "yes show me the deals", true],
+    ]);
+  });
+
+  it("keeps a late final for the same utterance in its line", () => {
+    let lines = upsertLine([], { id: "u1", speaker: "viewer", text: "I wanna see the pipeline", final: false, at: 1 });
+    lines = upsertLine(lines, { id: "a1", speaker: "agent", text: "Sure.", final: false, at: 2 });
+    lines = upsertLine(lines, { id: "u1", speaker: "viewer", text: "I want to see the pipeline.", final: true, at: 1 });
+    expect(lines.map((l) => [l.id, l.text, l.final])).toEqual([
+      ["u1", "I want to see the pipeline.", true],
+      ["a1", "Sure.", false],
+    ]);
+  });
+
   it("keeps a bounded history", () => {
     let lines = upsertLine([], { id: "0", speaker: "agent", text: "a", final: true, at: 0 });
     for (let i = 1; i <= MAX_LINES + 5; i++)
